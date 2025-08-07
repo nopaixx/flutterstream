@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/providers/auth_provider.dart';
+import '../../core/theme/app_theme.dart';
 import '../widgets/custom_text_field.dart';
 import '../widgets/custom_button.dart';
 
@@ -9,13 +10,45 @@ class LoginScreen extends StatefulWidget {
   _LoginScreenState createState() => _LoginScreenState();
 }
 
-class _LoginScreenState extends State<LoginScreen> {
+class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin {
   final TextEditingController _emailController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
   final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
 
+  late AnimationController _animationController;
+  late Animation<double> _fadeAnimation;
+  late Animation<Offset> _slideAnimation;
+
+  @override
+  void initState() {
+    super.initState();
+    _animationController = AnimationController(
+      duration: const Duration(milliseconds: 1500),
+      vsync: this,
+    );
+
+    _fadeAnimation = Tween<double>(
+      begin: 0.0,
+      end: 1.0,
+    ).animate(CurvedAnimation(
+      parent: _animationController,
+      curve: Curves.easeInOut,
+    ));
+
+    _slideAnimation = Tween<Offset>(
+      begin: const Offset(0, 0.5),
+      end: Offset.zero,
+    ).animate(CurvedAnimation(
+      parent: _animationController,
+      curve: Curves.easeOutCubic,
+    ));
+
+    _animationController.forward();
+  }
+
   @override
   void dispose() {
+    _animationController.dispose();
     _emailController.dispose();
     _passwordController.dispose();
     super.dispose();
@@ -25,53 +58,158 @@ class _LoginScreenState extends State<LoginScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       body: Container(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [
-              Colors.black.withOpacity(0.8),
-              Colors.black,
-            ],
-          ),
+        decoration: const BoxDecoration(
+          gradient: AppTheme.backgroundGradient,
         ),
-        child: SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.all(24.0),
-            child: Form(
-              key: _formKey,
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  _buildLogo(),
-                  const SizedBox(height: 60),
-                  _buildLoginForm(),
-                  const SizedBox(height: 24),
-                  _buildLoginButton(),
-                  const SizedBox(height: 24),
-                  _buildHelpText(),
-                  const SizedBox(height: 16),
-                  _buildSignUpText(),
-                ],
+        child: Stack(
+          children: [
+            // Animated background elements
+            _buildAnimatedBackground(),
+
+            // Main content
+            SafeArea(
+              child: Center(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.all(24.0),
+                  child: FadeTransition(
+                    opacity: _fadeAnimation,
+                    child: SlideTransition(
+                      position: _slideAnimation,
+                      child: Form(
+                        key: _formKey,
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            _buildLogo(),
+                            const SizedBox(height: 48),
+                            _buildWelcomeText(),
+                            const SizedBox(height: 32),
+                            _buildLoginForm(),
+                            const SizedBox(height: 24),
+                            _buildLoginButton(),
+                            const SizedBox(height: 32),
+                            _buildDemoCredentials(),
+                            const SizedBox(height: 24),
+                            _buildFooterText(),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
               ),
             ),
-          ),
+          ],
         ),
       ),
     );
   }
 
-  Widget _buildLogo() {
-    return const Text(
-      'NETFLIX',
-      textAlign: TextAlign.center,
-      style: TextStyle(
-        fontSize: 48,
-        fontWeight: FontWeight.bold,
-        color: Color(0xFFE50914),
-        letterSpacing: 4,
+  Widget _buildAnimatedBackground() {
+    return Positioned.fill(
+      child: Stack(
+        children: [
+          // Floating gradient circles
+          Positioned(
+            top: -100,
+            right: -50,
+            child: Container(
+              width: 200,
+              height: 200,
+              decoration: BoxDecoration(
+                gradient: AppTheme.primaryGradient.scale(0.3),
+                shape: BoxShape.circle,
+              ),
+            ),
+          ),
+          Positioned(
+            bottom: -80,
+            left: -30,
+            child: Container(
+              width: 150,
+              height: 150,
+              decoration: BoxDecoration(
+                gradient: AppTheme.accentGradient.scale(0.2),
+                shape: BoxShape.circle,
+              ),
+            ),
+          ),
+        ],
       ),
+    );
+  }
+
+  Widget _buildLogo() {
+    return Column(
+      children: [
+        Container(
+          width: 80,
+          height: 80,
+          decoration: BoxDecoration(
+            gradient: AppTheme.primaryGradient,
+            borderRadius: BorderRadius.circular(20),
+            boxShadow: [
+              BoxShadow(
+                color: AppTheme.primaryPurple.withOpacity(0.4),
+                blurRadius: 20,
+                offset: const Offset(0, 10),
+              ),
+            ],
+          ),
+          child: const Icon(
+            Icons.play_circle_filled,
+            color: Colors.white,
+            size: 40,
+          ),
+        ),
+        const SizedBox(height: 16),
+        ShaderMask(
+          shaderCallback: (bounds) => AppTheme.primaryGradient.createShader(bounds),
+          child: const Text(
+            'LIVEVAULTHUB',
+            style: TextStyle(
+              fontSize: 28,
+              fontWeight: FontWeight.w900,
+              color: Colors.white,
+              letterSpacing: 1.5,
+            ),
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          'Tu plataforma de streaming personal',
+          style: TextStyle(
+            color: AppTheme.textGrey,
+            fontSize: 14,
+            fontWeight: FontWeight.w400,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildWelcomeText() {
+    return Column(
+      children: [
+        const Text(
+          'Bienvenido de vuelta',
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: 24,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          'Ingresa a tu vault personal',
+          style: TextStyle(
+            color: AppTheme.textGrey,
+            fontSize: 16,
+            fontWeight: FontWeight.w400,
+          ),
+        ),
+      ],
     );
   }
 
@@ -80,7 +218,7 @@ class _LoginScreenState extends State<LoginScreen> {
       children: [
         CustomTextField(
           controller: _emailController,
-          hintText: 'Email o número de teléfono',
+          hintText: 'Email o nombre de usuario',
           keyboardType: TextInputType.emailAddress,
           validator: (value) {
             if (value == null || value.isEmpty) {
@@ -104,6 +242,32 @@ class _LoginScreenState extends State<LoginScreen> {
             return null;
           },
         ),
+        const SizedBox(height: 8),
+        Align(
+          alignment: Alignment.centerRight,
+          child: TextButton(
+            onPressed: () {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: const Text('Función próximamente'),
+                  backgroundColor: AppTheme.primaryPurple,
+                  behavior: SnackBarBehavior.floating,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+              );
+            },
+            child: Text(
+              '¿Olvidaste tu contraseña?',
+              style: TextStyle(
+                color: AppTheme.primaryViolet,
+                fontSize: 14,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+        ),
       ],
     );
   }
@@ -115,23 +279,26 @@ class _LoginScreenState extends State<LoginScreen> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             CustomButton(
-              text: 'Iniciar sesión',
+              text: 'Entrar al Hub',
               isLoading: authProvider.isLoading,
               onPressed: () => _handleLogin(authProvider),
             ),
             if (authProvider.error != null) ...[
               const SizedBox(height: 16),
               Container(
-                padding: const EdgeInsets.all(12),
+                padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
                   color: Colors.red.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.red.withOpacity(0.3)),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: Colors.red.withOpacity(0.3),
+                    width: 1,
+                  ),
                 ),
                 child: Row(
                   children: [
-                    const Icon(Icons.error_outline, color: Colors.red, size: 20),
-                    const SizedBox(width: 8),
+                    Icon(Icons.error_outline_rounded, color: Colors.red, size: 20),
+                    const SizedBox(width: 12),
                     Expanded(
                       child: Text(
                         authProvider.error!,
@@ -148,33 +315,81 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 
-  Widget _buildHelpText() {
-    return Text(
-      '¿Necesitas ayuda?',
-      textAlign: TextAlign.center,
-      style: TextStyle(
-        color: Colors.grey[400],
-        fontSize: 14,
+  Widget _buildDemoCredentials() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        gradient: AppTheme.primaryGradient.scale(0.1),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: AppTheme.primaryViolet.withOpacity(0.3),
+          width: 1,
+        ),
       ),
-    );
-  }
-
-  Widget _buildSignUpText() {
-    return RichText(
-      textAlign: TextAlign.center,
-      text: TextSpan(
-        text: '¿Primera vez en Netflix? ',
-        style: TextStyle(color: Colors.grey[400], fontSize: 14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          TextSpan(
-            text: 'Suscríbete ahora.',
+          Row(
+            children: [
+              Icon(
+                Icons.info_outline_rounded,
+                color: AppTheme.primaryViolet,
+                size: 20,
+              ),
+              const SizedBox(width: 8),
+              Text(
+                'Credenciales de Prueba',
+                style: TextStyle(
+                  color: AppTheme.primaryViolet,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            '📧 Email: test@netflix.com\n🔑 Password: 123456',
             style: TextStyle(
-              color: Colors.white,
-              fontWeight: FontWeight.bold,
+              color: AppTheme.textGrey,
+              fontSize: 13,
+              fontFamily: 'monospace',
             ),
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildFooterText() {
+    return Column(
+      children: [
+        RichText(
+          textAlign: TextAlign.center,
+          text: TextSpan(
+            text: '¿Nuevo en LiveVaultHub? ',
+            style: TextStyle(color: AppTheme.textGrey, fontSize: 14),
+            children: [
+              TextSpan(
+                text: 'Crear cuenta',
+                style: TextStyle(
+                  color: AppTheme.primaryViolet,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+        Text(
+          'v1.0.0 Beta • Made with 💜 for Creators',
+          style: TextStyle(
+            color: AppTheme.textGrey.withOpacity(0.6),
+            fontSize: 12,
+          ),
+          textAlign: TextAlign.center,
+        ),
+      ],
     );
   }
 
@@ -191,9 +406,18 @@ class _LoginScreenState extends State<LoginScreen> {
     );
 
     if (!success && mounted) {
-      // El error ya se muestra automáticamente a través del Consumer
-      // Podríamos agregar haptic feedback aquí
       FocusScope.of(context).unfocus();
     }
+  }
+}
+
+// Extension para gradients (si no existe ya)
+extension GradientExtension on LinearGradient {
+  LinearGradient scale(double opacity) {
+    return LinearGradient(
+      begin: begin,
+      end: end,
+      colors: colors.map((color) => color.withOpacity(opacity)).toList(),
+    );
   }
 }
