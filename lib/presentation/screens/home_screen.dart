@@ -7,6 +7,7 @@ import '../widgets/livevaulthub_app_bar.dart';
 import '../widgets/featured_content.dart';
 import '../widgets/movie_section.dart';
 import '../widgets/livevaulthub_bottom_navigation.dart';
+import 'login_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   @override
@@ -48,6 +49,18 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       extendBodyBehindAppBar: true,
       appBar: LiveVaultHubAppBar(
         onProfileTap: _showProfileMenu,
+        onSearchTap: () {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: const Text('🔍 Búsqueda próximamente'),
+              backgroundColor: AppTheme.primaryPurple,
+              behavior: SnackBarBehavior.floating,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+            ),
+          );
+        },
       ),
       body: Container(
         decoration: const BoxDecoration(
@@ -102,7 +115,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 ),
                 const SizedBox(height: 16),
                 Text(
-                  'Cargando tu Vault...',
+                  'Cargando LiveVaultHub...',
                   style: TextStyle(
                     color: AppTheme.textGrey,
                     fontSize: 16,
@@ -215,25 +228,39 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
                 const SizedBox(height: 32),
 
-                // Content sections with updated names
+                // Content sections
                 if (contentProvider.trendingMovies.isNotEmpty)
                   MovieSection(
                     title: '🔥 Trending en LiveVault',
                     movies: contentProvider.trendingMovies,
                   ),
 
-                if (contentProvider.continueWatchingMovies.isNotEmpty)
-                  MovieSection(
-                    title: '▶️ Continuar Viendo',
-                    movies: contentProvider.continueWatchingMovies,
-                    showProgress: true,
-                  ),
+                // Solo mostrar "Continuar Viendo" si hay usuario logueado
+                Consumer<AuthProvider>(
+                  builder: (context, authProvider, child) {
+                    if (authProvider.isLoggedIn && contentProvider.continueWatchingMovies.isNotEmpty) {
+                      return MovieSection(
+                        title: '▶️ Continuar Viendo',
+                        movies: contentProvider.continueWatchingMovies,
+                        showProgress: true,
+                      );
+                    }
+                    return const SizedBox.shrink();
+                  },
+                ),
 
-                if (contentProvider.myListMovies.isNotEmpty)
-                  MovieSection(
-                    title: '💜 Mi Vault Personal',
-                    movies: contentProvider.myListMovies,
-                  ),
+                // Solo mostrar "Mi Lista" si hay usuario logueado
+                Consumer<AuthProvider>(
+                  builder: (context, authProvider, child) {
+                    if (authProvider.isLoggedIn && contentProvider.myListMovies.isNotEmpty) {
+                      return MovieSection(
+                        title: '💜 Mi Vault Personal',
+                        movies: contentProvider.myListMovies,
+                      );
+                    }
+                    return const SizedBox.shrink();
+                  },
+                ),
 
                 if (contentProvider.popularMovies.isNotEmpty)
                   MovieSection(
@@ -246,6 +273,16 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                     title: '⚡ Acción & Aventura',
                     movies: contentProvider.actionMovies,
                   ),
+
+                // Banner para invitar al registro si no está logueado
+                Consumer<AuthProvider>(
+                  builder: (context, authProvider, child) {
+                    if (!authProvider.isLoggedIn) {
+                      return _buildGuestModeBanner();
+                    }
+                    return const SizedBox.shrink();
+                  },
+                ),
 
                 const SizedBox(height: 100), // Bottom nav spacing
               ],
@@ -265,7 +302,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'Hola, ${authProvider.currentUser?.name.split(' ').first ?? 'Creator'}! 👋',
+                authProvider.isLoggedIn
+                    ? 'Hola, ${authProvider.currentUser?.name.split(' ').first ?? 'Creator'}! 👋'
+                    : 'Bienvenido a LiveVaultHub! 🎬',
                 style: const TextStyle(
                   color: Colors.white,
                   fontSize: 24,
@@ -274,7 +313,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               ),
               const SizedBox(height: 4),
               Text(
-                'Bienvenido a tu hub de contenido personal',
+                authProvider.isLoggedIn
+                    ? 'Tu hub de contenido personal'
+                    : 'Descubre contenido increíble sin límites',
                 style: TextStyle(
                   color: AppTheme.textGrey,
                   fontSize: 16,
@@ -285,6 +326,126 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           ),
         );
       },
+    );
+  }
+
+  Widget _buildGuestModeBanner() {
+    return Container(
+      margin: const EdgeInsets.all(20),
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        gradient: AppTheme.primaryGradient.scale(0.1),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: AppTheme.primaryViolet.withOpacity(0.3),
+          width: 1,
+        ),
+      ),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 50,
+                height: 50,
+                decoration: BoxDecoration(
+                  gradient: AppTheme.primaryGradient,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Icon(
+                  Icons.star_rounded,
+                  color: Colors.white,
+                  size: 28,
+                ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      '¡Únete a LiveVaultHub!',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 18,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    Text(
+                      'Guarda contenido, sincroniza progreso y más',
+                      style: TextStyle(
+                        color: AppTheme.textGrey,
+                        fontSize: 14,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 20),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: () {
+                    // Ya estás navegando como invitado, no hacer nada
+                  },
+                  style: OutlinedButton.styleFrom(
+                    side: BorderSide(color: AppTheme.primaryViolet.withOpacity(0.5)),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                  child: Text(
+                    'Continuar como invitado',
+                    style: TextStyle(
+                      color: AppTheme.textGrey,
+                      fontSize: 12,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Container(
+                  decoration: BoxDecoration(
+                    gradient: AppTheme.primaryGradient,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: ElevatedButton(
+                    onPressed: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => LoginScreen(),
+                        ),
+                      );
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.transparent,
+                      shadowColor: Colors.transparent,
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                    child: const Text(
+                      'Crear Cuenta',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 14,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 
@@ -421,122 +582,226 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
               Consumer<AuthProvider>(
                 builder: (context, authProvider, child) {
-                  return Column(
-                    children: [
-                      // User profile section
-                      Container(
-                        padding: const EdgeInsets.all(20),
-                        decoration: BoxDecoration(
-                          gradient: AppTheme.primaryGradient.scale(0.1),
-                          borderRadius: BorderRadius.circular(16),
-                          border: Border.all(
-                            color: AppTheme.primaryViolet.withOpacity(0.3),
-                            width: 1,
-                          ),
-                        ),
-                        child: Row(
-                          children: [
-                            Container(
-                              width: 60,
-                              height: 60,
-                              decoration: BoxDecoration(
-                                gradient: AppTheme.primaryGradient,
-                                borderRadius: BorderRadius.circular(16),
-                              ),
-                              child: Center(
-                                child: Text(
-                                  authProvider.currentUser?.name.substring(0, 1).toUpperCase() ?? 'U',
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 24,
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 16),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    authProvider.currentUser?.name ?? 'Usuario',
-                                    style: const TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 18,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    authProvider.currentUser?.email ?? '',
-                                    style: TextStyle(
-                                      color: AppTheme.textGrey,
-                                      fontSize: 14,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-
-                      const SizedBox(height: 24),
-
-                      // Menu options
-                      _buildMenuTile(
-                        Icons.person_rounded,
-                        'Mi Perfil',
-                            () => Navigator.pop(context),
-                      ),
-                      _buildMenuTile(
-                        Icons.settings_rounded,
-                        'Configuración',
-                            () => Navigator.pop(context),
-                      ),
-                      _buildMenuTile(
-                        Icons.help_outline_rounded,
-                        'Ayuda & Soporte',
-                            () => Navigator.pop(context),
-                      ),
-
-                      const SizedBox(height: 24),
-
-                      // Logout button
-                      Container(
-                        width: double.infinity,
-                        decoration: BoxDecoration(
-                          color: Colors.red.withOpacity(0.1),
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(
-                            color: Colors.red.withOpacity(0.3),
-                            width: 1,
-                          ),
-                        ),
-                        child: ListTile(
-                          leading: const Icon(Icons.logout_rounded, color: Colors.redAccent),
-                          title: const Text(
-                            'Cerrar Sesión',
-                            style: TextStyle(
-                              color: Colors.redAccent,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                          onTap: () {
-                            Navigator.pop(context);
-                            _handleLogout();
-                          },
-                        ),
-                      ),
-                    ],
-                  );
+                  if (authProvider.isLoggedIn) {
+                    // Usuario logueado - Mostrar perfil completo
+                    return _buildLoggedInProfile(authProvider);
+                  } else {
+                    // Usuario invitado - Mostrar opción de login
+                    return _buildGuestProfile();
+                  }
                 },
               ),
             ],
           ),
         );
       },
+    );
+  }
+
+  Widget _buildLoggedInProfile(AuthProvider authProvider) {
+    return Column(
+      children: [
+        // User profile section
+        Container(
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            gradient: AppTheme.primaryGradient.scale(0.1),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: AppTheme.primaryViolet.withOpacity(0.3),
+              width: 1,
+            ),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 60,
+                height: 60,
+                decoration: BoxDecoration(
+                  gradient: AppTheme.primaryGradient,
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: Center(
+                  child: Text(
+                    authProvider.currentUser?.name.substring(0, 1).toUpperCase() ?? 'U',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 24,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      authProvider.currentUser?.name ?? 'Usuario',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 18,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      authProvider.currentUser?.email ?? '',
+                      style: TextStyle(
+                        color: AppTheme.textGrey,
+                        fontSize: 14,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+
+        const SizedBox(height: 24),
+
+        // Menu options
+        _buildMenuTile(
+          Icons.person_rounded,
+          'Mi Perfil',
+              () => Navigator.pop(context),
+        ),
+        _buildMenuTile(
+          Icons.settings_rounded,
+          'Configuración',
+              () => Navigator.pop(context),
+        ),
+        _buildMenuTile(
+          Icons.help_outline_rounded,
+          'Ayuda & Soporte',
+              () => Navigator.pop(context),
+        ),
+
+        const SizedBox(height: 24),
+
+        // Logout button
+        Container(
+          width: double.infinity,
+          decoration: BoxDecoration(
+            color: Colors.red.withOpacity(0.1),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: Colors.red.withOpacity(0.3),
+              width: 1,
+            ),
+          ),
+          child: ListTile(
+            leading: const Icon(Icons.logout_rounded, color: Colors.redAccent),
+            title: const Text(
+              'Cerrar Sesión',
+              style: TextStyle(
+                color: Colors.redAccent,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            onTap: () {
+              Navigator.pop(context);
+              _handleLogout();
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildGuestProfile() {
+    return Column(
+      children: [
+        // Guest icon
+        Container(
+          width: 80,
+          height: 80,
+          decoration: BoxDecoration(
+            gradient: AppTheme.primaryGradient.scale(0.3),
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: Icon(
+            Icons.person_outline_rounded,
+            size: 40,
+            color: AppTheme.primaryViolet,
+          ),
+        ),
+
+        const SizedBox(height: 16),
+
+        const Text(
+          'Modo Invitado',
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: 20,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+
+        const SizedBox(height: 8),
+
+        Text(
+          'Inicia sesión para acceder a todas las funciones',
+          style: TextStyle(
+            color: AppTheme.textGrey,
+            fontSize: 14,
+          ),
+          textAlign: TextAlign.center,
+        ),
+
+        const SizedBox(height: 24),
+
+        // Login button
+        Container(
+          width: double.infinity,
+          decoration: BoxDecoration(
+            gradient: AppTheme.primaryGradient,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context);
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => LoginScreen(),
+                ),
+              );
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.transparent,
+              shadowColor: Colors.transparent,
+              padding: const EdgeInsets.symmetric(vertical: 16),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+            child: const Text(
+              'Iniciar Sesión',
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w600,
+                fontSize: 16,
+              ),
+            ),
+          ),
+        ),
+
+        const SizedBox(height: 12),
+
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: Text(
+            'Continuar como invitado',
+            style: TextStyle(
+              color: AppTheme.textGrey,
+              fontSize: 14,
+            ),
+          ),
+        ),
+      ],
     );
   }
 
@@ -623,7 +888,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   }
 }
 
-// Extension para gradients (si no existe ya)
+// Extension para gradients
 extension GradientExtension on LinearGradient {
   LinearGradient scale(double opacity) {
     return LinearGradient(

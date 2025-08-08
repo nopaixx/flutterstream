@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../data/models/movie_model.dart';
 import '../../data/repositories/movie_repository.dart';
+import './auth_provider.dart';
 
 class ContentProvider extends ChangeNotifier {
   final MovieRepository _movieRepository = MockMovieRepository();
@@ -64,7 +65,17 @@ class ContentProvider extends ChangeNotifier {
     await loadAllContent();
   }
 
-  Future<bool> toggleMyList(String movieId) async {
+  // Método modificado para manejar acciones que requieren autenticación
+  Future<bool> toggleMyList(String movieId, BuildContext context, AuthProvider authProvider) async {
+    // Verificar si requiere autenticación
+    if (authProvider.requiresAuth('add_to_list')) {
+      if (!authProvider.isLoggedIn) {
+        // Mostrar diálogo de login requerido
+        authProvider.showLoginRequired(context, feature: 'add_to_list');
+        return false;
+      }
+    }
+
     try {
       final movie = _findMovieById(movieId);
       if (movie == null) return false;
@@ -80,8 +91,10 @@ class ContentProvider extends ChangeNotifier {
         // Actualizar el estado local
         _updateMovieInLists(movieId, (movie) => movie.copyWith(isInMyList: !movie.isInMyList));
 
-        // Recargar la lista "Mi lista"
-        _myListMovies = await _movieRepository.getMyListMovies();
+        // Recargar la lista "Mi lista" solo si el usuario está logueado
+        if (authProvider.isLoggedIn) {
+          _myListMovies = await _movieRepository.getMyListMovies();
+        }
         notifyListeners();
       }
 
@@ -93,8 +106,11 @@ class ContentProvider extends ChangeNotifier {
     }
   }
 
-  Future<bool> updateWatchProgress(String movieId, int progress) async {
+  // Método modificado para manejar progreso de visualización
+  Future<bool> updateWatchProgress(String movieId, int progress, AuthProvider? authProvider) async {
     try {
+      // El progreso se puede guardar localmente sin autenticación
+      // Pero se sincroniza con el servidor solo si está logueado
       final success = await _movieRepository.updateWatchProgress(movieId, progress);
 
       if (success) {
@@ -114,6 +130,21 @@ class ContentProvider extends ChangeNotifier {
       notifyListeners();
       return false;
     }
+  }
+
+  // Método para verificar si el contenido es premium
+  bool isContentPremium(String movieId) {
+    final movie = _findMovieById(movieId);
+    // Por ahora todo el contenido es gratuito, pero aquí se podría agregar lógica
+    return false;
+  }
+
+  // Método para verificar acceso a contenido
+  bool canAccessContent(String movieId, AuthProvider authProvider) {
+    if (isContentPremium(movieId)) {
+      return authProvider.isPremiumUser;
+    }
+    return true; // Contenido gratuito accesible para todos
   }
 
   MovieModel? _findMovieById(String movieId) {

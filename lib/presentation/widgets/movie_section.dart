@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import '../../data/models/movie_model.dart';
+import '../../core/providers/content_provider.dart';
+import '../../core/providers/auth_provider.dart';
 import '../screens/video_player_screen.dart';
 
 class MovieSection extends StatelessWidget {
@@ -67,12 +70,20 @@ class MovieCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return GestureDetector(
       onTap: () {
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (context) => VideoPlayerScreen(movie: movie),
-          ),
-        );
+        // Verificar acceso al contenido antes de navegar
+        final contentProvider = Provider.of<ContentProvider>(context, listen: false);
+        final authProvider = Provider.of<AuthProvider>(context, listen: false);
+
+        if (contentProvider.canAccessContent(movie.id, authProvider)) {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => VideoPlayerScreen(movie: movie),
+            ),
+          );
+        } else {
+          authProvider.showLoginRequired(context, feature: 'premium_content');
+        }
       },
       child: Container(
         width: 130,

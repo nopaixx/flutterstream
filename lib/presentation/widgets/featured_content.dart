@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../data/models/movie_model.dart';
 import '../../core/providers/content_provider.dart';
+import '../../core/providers/auth_provider.dart';
 import '../screens/video_player_screen.dart';
+import '../screens/login_screen.dart';
 
 class FeaturedContent extends StatelessWidget {
   final MovieModel movie;
@@ -164,18 +166,23 @@ class FeaturedContent extends StatelessWidget {
   }
 
   Widget _buildActionButtons(BuildContext context) {
-    return Consumer<ContentProvider>(
-      builder: (context, contentProvider, child) {
+    return Consumer2<ContentProvider, AuthProvider>(
+      builder: (context, contentProvider, authProvider, child) {
         return Row(
           mainAxisAlignment: MainAxisAlignment.spaceEvenly,
           children: [
-            // My List Button
+            // My List Button - Requiere login
             _buildActionButton(
               icon: movie.isInMyList ? Icons.check : Icons.add,
-              label: movie.isInMyList ? 'Mi Lista' : 'Mi Lista',
+              label: movie.isInMyList ? 'En Mi Lista' : 'Mi Lista',
               onTap: () async {
-                final success = await contentProvider.toggleMyList(movie.id);
-                if (success) {
+                final success = await contentProvider.toggleMyList(
+                    movie.id,
+                    context,
+                    authProvider
+                );
+
+                if (success && authProvider.isLoggedIn) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
                       content: Text(
@@ -183,7 +190,7 @@ class FeaturedContent extends StatelessWidget {
                             ? 'Eliminado de Mi Lista'
                             : 'Agregado a Mi Lista',
                       ),
-                      backgroundColor: const Color(0xFFE50914),
+                      backgroundColor: const Color(0xFF6B46C1),
                       duration: const Duration(seconds: 2),
                     ),
                   );
@@ -191,17 +198,23 @@ class FeaturedContent extends StatelessWidget {
               },
             ),
 
-            // Play Button
+            // Play Button - No requiere login
             Container(
               height: 45,
               child: ElevatedButton.icon(
                 onPressed: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => VideoPlayerScreen(movie: movie),
-                    ),
-                  );
+                  // Verificar si puede acceder al contenido
+                  if (contentProvider.canAccessContent(movie.id, authProvider)) {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => VideoPlayerScreen(movie: movie),
+                      ),
+                    );
+                  } else {
+                    // Mostrar diálogo de contenido premium
+                    authProvider.showLoginRequired(context, feature: 'premium_content');
+                  }
                 },
                 icon: const Icon(Icons.play_arrow, color: Colors.black, size: 28),
                 label: const Text(
@@ -223,7 +236,7 @@ class FeaturedContent extends StatelessWidget {
               ),
             ),
 
-            // Info Button
+            // Info Button - No requiere login
             _buildActionButton(
               icon: Icons.info_outline,
               label: 'Información',

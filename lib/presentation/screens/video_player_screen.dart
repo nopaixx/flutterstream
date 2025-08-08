@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:video_player/video_player.dart';
 import '../../data/models/movie_model.dart';
 import '../../core/providers/content_provider.dart';
+import '../../core/providers/auth_provider.dart';
 import '../widgets/custom_button.dart';
 
 class VideoPlayerScreen extends StatefulWidget {
@@ -64,8 +65,9 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
       final progress = _controller.value.position.inSeconds;
       if (progress > 0 && progress % 30 == 0) {
         // Actualizar progreso cada 30 segundos
-        Provider.of<ContentProvider>(context, listen: false)
-            .updateWatchProgress(widget.movie.id, progress);
+        final contentProvider = Provider.of<ContentProvider>(context, listen: false);
+        final authProvider = Provider.of<AuthProvider>(context, listen: false);
+        contentProvider.updateWatchProgress(widget.movie.id, progress, authProvider);
       }
     }
   }
@@ -230,19 +232,6 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
     );
   }
 
-  Widget _buildPlaceholder() {
-    return Container(
-      color: Colors.grey[800],
-      child: const Center(
-        child: Icon(
-          Icons.play_circle_outline,
-          size: 64,
-          color: Colors.white70,
-        ),
-      ),
-    );
-  }
-
   Widget _buildMovieInfo() {
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
@@ -309,8 +298,8 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
   }
 
   Widget _buildActionButtons() {
-    return Consumer<ContentProvider>(
-      builder: (context, contentProvider, child) {
+    return Consumer2<ContentProvider, AuthProvider>(
+      builder: (context, contentProvider, authProvider, child) {
         final isInMyList = widget.movie.isInMyList;
 
         return Column(
@@ -339,8 +328,12 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                 Expanded(
                   child: OutlinedButton.icon(
                     onPressed: () async {
-                      final success = await contentProvider.toggleMyList(widget.movie.id);
-                      if (success && mounted) {
+                      final success = await contentProvider.toggleMyList(
+                        widget.movie.id,
+                        context,
+                        authProvider,
+                      );
+                      if (success && authProvider.isLoggedIn && mounted) {
                         ScaffoldMessenger.of(context).showSnackBar(
                           SnackBar(
                             content: Text(
