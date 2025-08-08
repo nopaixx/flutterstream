@@ -5,7 +5,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>Streamapp01</string>
+	<string>LiveVaultHub</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -13,7 +13,7 @@
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>streamapp01</string>
+	<string>netflix_clone</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
@@ -41,9 +41,68 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
-	<key>CADisableMinimumFrameDurationOnPhone</key>
+
+	<!-- 🚀 LIVEVAULTHUB P2P CONFIGURATIONS -->
+
+	<!-- Permitir contenido HTTP para streams -->
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
+		<key>NSAllowsArbitraryLoadsInWebContent</key>
+		<true/>
+	</dict>
+
+	<!-- Permisos de cámara y micrófono para WebRTC -->
+	<key>NSCameraUsageDescription</key>
+	<string>LiveVaultHub necesita acceso a la cámara para funciones de streaming avanzadas</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>LiveVaultHub necesita acceso al micrófono para audio en streams</string>
+
+	<!-- Permisos de red local para P2P -->
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>LiveVaultHub usa la red local para optimizar el streaming P2P</string>
+
+	<!-- Soporte para reproducción en background -->
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>audio</string>
+		<string>background-processing</string>
+	</array>
+
+	<!-- Configuración de WebView -->
+	<key>io.flutter.embedded_views_preview</key>
 	<true/>
-	<key>UIApplicationSupportsIndirectInputEvents</key>
+
+	<!-- URL Schemes para deep links -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>livevaulthub.deep.link</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>livevaulthub</string>
+				<string>https</string>
+			</array>
+		</dict>
+	</array>
+
+	<!-- Configuración de media playback -->
+	<key>AVAudioSessionCategoryPlayback</key>
 	<true/>
+
+	<!-- Soporte para PiP (Picture in Picture) -->
+	<key>AVPictureInPicturePlaybackRangeUserInterfaceEnabled</key>
+	<true/>
+
+	<!-- Optimizaciones de red para streaming -->
+	<key>NSURLSessionConfiguration</key>
+	<dict>
+		<key>NSURLRequestCachePolicy</key>
+		<integer>0</integer>
+		<key>NSURLRequestNetworkServiceType</key>
+		<integer>10</integer>
+	</dict>
 </dict>
 </plist>

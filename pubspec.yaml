@@ -13,6 +13,9 @@ dependencies:
   http: ^1.1.0
   shared_preferences: ^2.2.2
   provider: ^6.1.1
+  webview_flutter: ^4.4.2
+  webview_flutter_android: ^3.12.1  # 🆕 AÑADIDO para Android
+  webview_flutter_wkwebview: ^3.9.4  # 🆕 AÑADIDO para iOS
 
 dev_dependencies:
   flutter_test:
@@ -21,3 +24,6 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  # 🆕 AÑADIDO: Assets para WebView Player
+  assets:
+    - assets/webview/

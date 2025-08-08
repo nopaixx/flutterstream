@@ -1,0 +1,537 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LiveVaultHub P2P Player</title>
+
+    <!-- P2P Media Loader -->
+    <script src="https://cdn.jsdelivr.net/npm/p2p-media-loader-core@latest/build/p2p-media-loader-core.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/p2p-media-loader-hlsjs@latest/build/p2p-media-loader-hlsjs.min.js"></script>
+
+    <!-- HLS.js -->
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+
+    <!-- Vidstack Player -->
+    <script type="module" src="https://cdn.jsdelivr.net/npm/vidstack@^1.11.6/player/bundle.js"></script>
+    <script type="module" src="https://cdn.jsdelivr.net/npm/vidstack@^1.11.6/player/ui/bundle.js"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/vidstack@^1.11.6/player/styles/default/theme.css" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/vidstack@^1.11.6/player/styles/default/layouts/video.css" />
+
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: #000;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            overflow: hidden;
+        }
+
+        #player-container {
+            width: 100vw;
+            height: 100vh;
+            position: relative;
+        }
+
+        media-player {
+            width: 100%;
+            height: 100%;
+            --media-brand: #6B46C1;
+            --media-focus-ring: #8B5CF6;
+        }
+
+        .p2p-stats {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: rgba(0, 0, 0, 0.8);
+            color: #00ff00;
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-family: monospace;
+            z-index: 1000;
+            min-width: 200px;
+        }
+
+        .p2p-stats.hidden {
+            display: none;
+        }
+
+        .error-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.9);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            flex-direction: column;
+            z-index: 2000;
+        }
+
+        .error-overlay.hidden {
+            display: none;
+        }
+
+        .loading-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(135deg, #0F0F0F, #1F1F23);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            flex-direction: column;
+            z-index: 1500;
+        }
+
+        .loading-overlay.hidden {
+            display: none;
+        }
+
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 3px solid #333;
+            border-top: 3px solid #6B46C1;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-bottom: 16px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+<div id="player-container">
+    <!-- Loading Overlay -->
+    <div id="loading" class="loading-overlay">
+        <div class="spinner"></div>
+        <p>Iniciando LiveVaultHub Player...</p>
+        <small>Conectando red P2P...</small>
+    </div>
+
+    <!-- Error Overlay -->
+    <div id="error" class="error-overlay hidden">
+        <h3>⚠️ Error de Reproducción</h3>
+        <p id="error-message">No se pudo cargar el video</p>
+        <button onclick="retryLoad()" style="margin-top: 16px; padding: 8px 16px; background: #6B46C1; color: white; border: none; border-radius: 4px; cursor: pointer;">
+            Reintentar
+        </button>
+    </div>
+
+    <!-- P2P Stats -->
+    <div id="p2p-stats" class="p2p-stats hidden">
+        <div>P2P Status: <span id="p2p-status">Connecting...</span></div>
+        <div>Peers: <span id="peer-count">0</span></div>
+        <div>Downloaded: <span id="downloaded">0 MB</span></div>
+        <div>Uploaded: <span id="uploaded">0 MB</span></div>
+        <div>P2P Ratio: <span id="p2p-ratio">0%</span></div>
+    </div>
+
+    <!-- Vidstack Player -->
+    <media-player
+            id="player"
+            title="LiveVaultHub Stream"
+            src=""
+            crossorigin
+            playsinline
+            load="eager"
+            poster=""
+            storage="lvh-player"
+    >
+        <media-provider>
+            <media-poster class="vds-poster"></media-poster>
+        </media-provider>
+
+        <media-video-layout thumbnails=""></media-video-layout>
+    </media-player>
+</div>
+
+<script>
+    class LiveVaultHubPlayer {
+        constructor() {
+            this.player = null;
+            this.p2pEngine = null;
+            this.hls = null;
+            this.currentUrl = null;
+            this.isLive = false;
+            this.debug = false;
+
+            this.init();
+        }
+
+        init() {
+            this.player = document.getElementById('player');
+            this.setupMessageListener();
+            this.setupPlayerEvents();
+            this.log('LiveVaultHub Player initialized');
+        }
+
+        setupMessageListener() {
+            // Escuchar mensajes de Flutter
+            window.addEventListener('message', (event) => {
+                this.handleFlutterMessage(event.data);
+            });
+
+            // Para Android WebView
+            if (window.flutter_inappwebview) {
+                window.flutter_inappwebview.callHandler('onPlayerReady', {
+                    status: 'ready',
+                    timestamp: Date.now()
+                });
+            }
+        }
+
+        handleFlutterMessage(message) {
+            try {
+                const data = typeof message === 'string' ? JSON.parse(message) : message;
+                this.log('Received from Flutter:', data);
+
+                switch(data.action) {
+                    case 'loadVideo':
+                        this.loadVideo(data.url, data.options || {});
+                        break;
+                    case 'play':
+                        this.play();
+                        break;
+                    case 'pause':
+                        this.pause();
+                        break;
+                    case 'seekTo':
+                        this.seekTo(data.time);
+                        break;
+                    case 'setVolume':
+                        this.setVolume(data.volume);
+                        break;
+                    case 'toggleP2PStats':
+                        this.toggleP2PStats(data.show);
+                        break;
+                    case 'setDebug':
+                        this.debug = data.enabled;
+                        break;
+                    default:
+                        this.log('Unknown action:', data.action);
+                }
+            } catch (error) {
+                this.logError('Error handling Flutter message:', error);
+            }
+        }
+
+        async loadVideo(url, options = {}) {
+            try {
+                this.currentUrl = url;
+                this.isLive = options.isLive || url.includes('.m3u8');
+
+                this.showLoading();
+                this.hideError();
+
+                this.log('Loading video:', url);
+
+                // Configurar P2P Engine
+                if (this.isLive || url.includes('.m3u8')) {
+                    await this.setupP2P(url);
+                } else {
+                    // Video directo sin P2P
+                    this.player.src = url;
+                }
+
+                this.sendToFlutter({
+                    type: 'videoLoading',
+                    url: url,
+                    isLive: this.isLive
+                });
+
+            } catch (error) {
+                this.logError('Error loading video:', error);
+                this.showError('Error al cargar el video: ' + error.message);
+            }
+        }
+
+        async setupP2P(url) {
+            try {
+                // Limpiar instancia anterior
+                if (this.p2pEngine) {
+                    this.p2pEngine.destroy();
+                }
+
+                // Crear nuevo engine P2P
+                this.p2pEngine = new p2pml.hlsjs.Engine({
+                    loader: {
+                        trackerAnnounce: [
+                            'wss://tracker.novage.com.ua:443/announce',
+                            'wss://tracker.openwebtorrent.com:443/announce'
+                        ],
+                        rtcConfig: {
+                            iceServers: [
+                                { urls: 'stun:stun.l.google.com:19302' },
+                                { urls: 'stun:global.stun.twilio.com:3478' }
+                            ]
+                        }
+                    },
+                    segments: {
+                        forwardSegmentCount: 20,
+                        swarmId: this.generateSwarmId(url)
+                    }
+                });
+
+                // Configurar HLS.js con P2P
+                if (Hls.isSupported()) {
+                    this.hls = new Hls({
+                        liveSyncDurationCount: 7,
+                        loader: this.p2pEngine.createLoaderClass()
+                    });
+
+                    this.hls.loadSource(url);
+                    this.hls.attachMedia(this.player.querySelector('video'));
+
+                    this.setupP2PEvents();
+                    this.setupHLSEvents();
+                } else {
+                    // Fallback para Safari
+                    this.player.src = url;
+                }
+
+            } catch (error) {
+                this.logError('P2P setup failed:', error);
+                // Fallback sin P2P
+                this.player.src = url;
+            }
+        }
+
+        setupP2PEvents() {
+            if (!this.p2pEngine) return;
+
+            this.p2pEngine.on('peer_connect', (peer) => {
+                this.log('Peer connected:', peer.id);
+                this.updateP2PStats();
+            });
+
+            this.p2pEngine.on('peer_close', (peerId) => {
+                this.log('Peer disconnected:', peerId);
+                this.updateP2PStats();
+            });
+
+            this.p2pEngine.on('segment_loaded', (segment, peerId) => {
+                this.updateP2PStats();
+            });
+
+            // Actualizar stats cada 5 segundos
+            setInterval(() => this.updateP2PStats(), 5000);
+        }
+
+        setupHLSEvents() {
+            if (!this.hls) return;
+
+            this.hls.on(Hls.Events.MANIFEST_PARSED, () => {
+                this.log('HLS manifest parsed');
+                this.hideLoading();
+                this.sendToFlutter({
+                    type: 'videoReady',
+                    duration: this.player.duration,
+                    qualities: this.hls.levels
+                });
+            });
+
+            this.hls.on(Hls.Events.ERROR, (event, data) => {
+                this.logError('HLS Error:', data);
+                if (data.fatal) {
+                    this.showError('Error de streaming: ' + data.type);
+                }
+            });
+        }
+
+        setupPlayerEvents() {
+            this.player.addEventListener('loadstart', () => {
+                this.sendToFlutter({ type: 'loadstart' });
+            });
+
+            this.player.addEventListener('loadedmetadata', () => {
+                this.hideLoading();
+                this.sendToFlutter({
+                    type: 'loadedmetadata',
+                    duration: this.player.duration,
+                    videoWidth: this.player.videoWidth,
+                    videoHeight: this.player.videoHeight
+                });
+            });
+
+            this.player.addEventListener('canplay', () => {
+                this.sendToFlutter({ type: 'canplay' });
+            });
+
+            this.player.addEventListener('play', () => {
+                this.sendToFlutter({ type: 'play' });
+            });
+
+            this.player.addEventListener('pause', () => {
+                this.sendToFlutter({ type: 'pause' });
+            });
+
+            this.player.addEventListener('timeupdate', () => {
+                this.sendToFlutter({
+                    type: 'timeupdate',
+                    currentTime: this.player.currentTime,
+                    duration: this.player.duration
+                });
+            });
+
+            this.player.addEventListener('ended', () => {
+                this.sendToFlutter({ type: 'ended' });
+            });
+
+            this.player.addEventListener('error', (e) => {
+                this.logError('Player error:', e);
+                this.showError('Error de reproducción');
+            });
+        }
+
+        updateP2PStats() {
+            if (!this.p2pEngine) return;
+
+            const stats = this.p2pEngine.getStats();
+            const statsElement = document.getElementById('p2p-stats');
+
+            if (stats) {
+                document.getElementById('p2p-status').textContent = 'Connected';
+                document.getElementById('peer-count').textContent = stats.numPeers || 0;
+                document.getElementById('downloaded').textContent =
+                    ((stats.totalHTTPDownloaded + stats.totalP2PDownloaded) / 1024 / 1024).toFixed(1);
+                document.getElementById('uploaded').textContent =
+                    (stats.totalP2PUploaded / 1024 / 1024).toFixed(1);
+
+                const total = stats.totalHTTPDownloaded + stats.totalP2PDownloaded;
+                const p2pRatio = total > 0 ? (stats.totalP2PDownloaded / total * 100) : 0;
+                document.getElementById('p2p-ratio').textContent = p2pRatio.toFixed(1) + '%';
+
+                this.sendToFlutter({
+                    type: 'p2pStats',
+                    stats: {
+                        peers: stats.numPeers || 0,
+                        downloaded: stats.totalHTTPDownloaded + stats.totalP2PDownloaded,
+                        uploaded: stats.totalP2PUploaded,
+                        p2pRatio: p2pRatio
+                    }
+                });
+            }
+        }
+
+        // Control methods
+        play() {
+            this.player.play().catch(e => this.logError('Play failed:', e));
+        }
+
+        pause() {
+            this.player.pause();
+        }
+
+        seekTo(time) {
+            this.player.currentTime = time;
+        }
+
+        setVolume(volume) {
+            this.player.volume = Math.max(0, Math.min(1, volume));
+        }
+
+        toggleP2PStats(show) {
+            const statsElement = document.getElementById('p2p-stats');
+            if (show) {
+                statsElement.classList.remove('hidden');
+            } else {
+                statsElement.classList.add('hidden');
+            }
+        }
+
+        // Utility methods
+        generateSwarmId(url) {
+            // Generar ID único para el swarm basado en la URL
+            return btoa(url).replace(/[^a-zA-Z0-9]/g, '').substring(0, 20);
+        }
+
+        showLoading() {
+            document.getElementById('loading').classList.remove('hidden');
+        }
+
+        hideLoading() {
+            document.getElementById('loading').classList.add('hidden');
+        }
+
+        showError(message) {
+            document.getElementById('error-message').textContent = message;
+            document.getElementById('error').classList.remove('hidden');
+            this.hideLoading();
+        }
+
+        hideError() {
+            document.getElementById('error').classList.add('hidden');
+        }
+
+        sendToFlutter(data) {
+            try {
+                // Para webview_flutter
+                if (window.FlutterBridge && window.FlutterBridge.postMessage) {
+                    window.FlutterBridge.postMessage(JSON.stringify(data));
+                }
+
+                // Para web
+                if (window.parent && window.parent.postMessage) {
+                    window.parent.postMessage(JSON.stringify(data), '*');
+                }
+
+                // Log para debug
+                console.log('[LiveVaultHub] Sent to Flutter:', data);
+            } catch (error) {
+                this.logError('Error sending to Flutter:', error);
+            }
+        }
+
+        log(...args) {
+            if (this.debug) {
+                console.log('[LiveVaultHub]', ...args);
+            }
+        }
+
+        logError(...args) {
+            console.error('[LiveVaultHub ERROR]', ...args);
+        }
+    }
+
+    // Global functions
+    function retryLoad() {
+        if (window.lvhPlayer && window.lvhPlayer.currentUrl) {
+            window.lvhPlayer.loadVideo(window.lvhPlayer.currentUrl);
+        }
+    }
+
+    // Initialize player when DOM is ready
+    document.addEventListener('DOMContentLoaded', () => {
+        window.lvhPlayer = new LiveVaultHubPlayer();
+    });
+
+    // Fallback initialization
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', () => {
+            if (!window.lvhPlayer) {
+                window.lvhPlayer = new LiveVaultHubPlayer();
+            }
+        });
+    } else {
+        window.lvhPlayer = new LiveVaultHubPlayer();
+    }
+</script>
+</body>
+</html>
