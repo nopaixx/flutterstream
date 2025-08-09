@@ -3,9 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LiveVaultHub P2P Player - Debug Version</title>
+    <title>LiveVaultHub P2P Player - BRIDGE FIXED</title>
 
-    <!-- Import Maps for P2P Media Loader -->
+    <!-- ✅ HLS.js PRIMERO -->
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@~1/dist/hls.min.js"></script>
+
+    <!-- ✅ Import Maps CORRECTOS para v2 -->
     <script type="importmap">
         {
             "imports": {
@@ -15,10 +18,7 @@
         }
     </script>
 
-    <!-- HLS.js -->
-    <script src="https://cdn.jsdelivr.net/npm/hls.js@~1/dist/hls.min.js"></script>
-
-    <!-- Vidstack Player -->
+    <!-- ✅ Vidstack Player -->
     <link rel="stylesheet" href="https://cdn.vidstack.io/player/theme.css" />
     <link rel="stylesheet" href="https://cdn.vidstack.io/player/video.css" />
 
@@ -151,7 +151,7 @@
     <!-- Loading Overlay -->
     <div id="loading" class="loading-overlay">
         <div class="spinner"></div>
-        <div>🚀 Iniciando LiveVaultHub Player</div>
+        <div>🚀 Iniciando LiveVaultHub P2P Player</div>
         <div style="font-size: 14px; margin-top: 8px;">Conectando red P2P...</div>
     </div>
 
@@ -176,57 +176,230 @@
     <div id="player"></div>
 </div>
 
+<!-- ✅ GLOBAL BRIDGE SETUP -->
+<script>
+    console.log('🌉 Setting up global bridge...');
+
+    // ✅ GLOBAL STATE
+    window.lvhState = {
+        isInitialized: false,
+        currentUrl: null,
+        isLoading: false,
+        hasError: false,
+        playerInstance: null,
+        p2pStats: { peers: 0, downloaded: 0, ratio: 0 }
+    };
+
+    // ✅ COMMUNICATION QUEUES
+    window.toFlutterQueue = [];
+    window.fromFlutterQueue = [];
+
+    // ✅ GLOBAL DEBUG FUNCTION
+    window.debugLog = function(message, data = null) {
+        const timestamp = new Date().toLocaleTimeString();
+        const logMessage = `[${timestamp}] ${message}${data ? ' ' + JSON.stringify(data) : ''}`;
+        console.log('[LiveVaultHub Bridge]', logMessage);
+
+        // Update debug panel
+        const debugContent = document.getElementById('debug-content');
+        if (debugContent) {
+            debugContent.innerHTML = logMessage + '<br>' + debugContent.innerHTML;
+            const lines = debugContent.innerHTML.split('<br>');
+            if (lines.length > 10) {
+                debugContent.innerHTML = lines.slice(0, 10).join('<br>');
+            }
+        }
+    };
+
+    // ✅ BRIDGE FUNCTIONS FOR PARENT WINDOW
+    window.sendToFlutter = function(data) {
+        window.debugLog('📤 Bridge sending to Flutter:', data);
+        window.toFlutterQueue.push(JSON.stringify(data));
+
+        // ✅ ALSO try postMessage to parent
+        try {
+            if (window.parent && window.parent !== window) {
+                window.parent.postMessage({ type: 'player-event', data: data }, '*');
+            }
+        } catch (e) {
+            window.debugLog('⚠️ postMessage failed:', e.message);
+        }
+    };
+
+    // ✅ RECEIVE MESSAGES FROM FLUTTER
+    window.addEventListener('message', (event) => {
+        window.debugLog('📥 Bridge received message:', event.data);
+        if (event.data && event.data.action) {
+            window.fromFlutterQueue.push(event.data);
+            window.processFlutterMessage(event.data);
+        }
+    });
+
+    // ✅ PROCESS FLUTTER MESSAGES
+    window.processFlutterMessage = function(message) {
+        window.debugLog('⚙️ Processing Flutter message:', message);
+
+        if (window.lvhState.playerInstance && window.lvhState.playerInstance.handleFlutterMessage) {
+            window.lvhState.playerInstance.handleFlutterMessage(message);
+        } else {
+            window.debugLog('⚠️ Player not ready, message queued');
+        }
+    };
+
+    // ✅ GLOBAL FUNCTIONS FOR DEBUGGING (EXPOSED TO PARENT)
+    window.getPlayerState = function() {
+        const state = {
+            bridge: {
+                isInitialized: window.lvhState.isInitialized,
+                currentUrl: window.lvhState.currentUrl,
+                playerInstance: !!window.lvhState.playerInstance,
+                queueSizes: {
+                    toFlutter: window.toFlutterQueue.length,
+                    fromFlutter: window.fromFlutterQueue.length
+                }
+            },
+            player: window.lvhState.playerInstance ? {
+                currentState: window.lvhState.playerInstance.currentState,
+                isLive: window.lvhState.playerInstance.isLive,
+                p2pStats: window.lvhState.p2pStats
+            } : null
+        };
+
+        window.debugLog('📊 Current state:', state);
+        return state;
+    };
+
+    window.testLoadVideo = function() {
+        window.debugLog('🧪 Manual test load video');
+        if (window.lvhState.playerInstance) {
+            const testUrl = 'https://fcc3ddae59ed.us-west-2.playback.live-video.net/api/video/v1/us-west-2.893648527354.channel.DmumNckWFTqz.m3u8';
+            window.lvhState.playerInstance.loadVideo(testUrl, { isLive: true });
+        } else {
+            window.debugLog('❌ Player instance not available');
+        }
+    };
+
+    window.toggleP2PStats = function() {
+        const stats = document.getElementById('p2p-stats');
+        if (stats) {
+            stats.classList.toggle('hidden');
+            window.debugLog('📊 P2P stats toggled');
+        }
+    };
+
+    window.retryLoad = function() {
+        window.debugLog('🔄 Retry load triggered');
+        if (window.lvhState.currentUrl) {
+            window.testLoadVideo();
+        } else {
+            window.debugLog('❌ No URL to retry');
+        }
+    };
+
+    // ✅ EXPOSE FUNCTIONS TO PARENT WINDOW
+    try {
+        if (window.parent && window.parent !== window) {
+            window.parent.lvhPlayer = {
+                getState: window.getPlayerState,
+                testLoad: window.testLoadVideo,
+                toggleStats: window.toggleP2PStats,
+                retry: window.retryLoad
+            };
+            window.debugLog('✅ Functions exposed to parent window');
+        }
+    } catch (e) {
+        window.debugLog('⚠️ Could not expose to parent:', e.message);
+    }
+
+    window.debugLog('✅ Global bridge setup complete');
+</script>
+
+<!-- ✅ MAIN PLAYER MODULE -->
 <script type="module">
     import {
         VidstackPlayer,
         VidstackPlayerLayout,
     } from "https://cdn.vidstack.io/player";
 
+    // ✅ IMPORTAR P2P Media Loader
+    import { HlsJsP2PEngine } from "p2p-media-loader-hlsjs";
+
     class LiveVaultHubPlayer {
         constructor() {
             this.player = null;
+            this.hlsInstance = null;
+            this.p2pEngine = null;
             this.currentUrl = null;
             this.isLive = false;
             this.debug = true;
             this.currentState = 'initializing';
             this.isWeb = typeof window !== 'undefined' && !window.flutter_inappwebview;
             this.messageQueue = [];
+            this.p2pStats = {
+                peers: 0,
+                downloaded: 0,
+                ratio: 0
+            };
 
-            this.debugLog('🎬 Constructor called', { isWeb: this.isWeb });
+            window.debugLog('🎬 LiveVaultHub Player Constructor');
             this.init();
-        }
-
-        debugLog(message, data = null) {
-            console.log('[LiveVaultHub]', message, data || '');
-
-            // Mostrar en debug panel
-            const debugContent = document.getElementById('debug-content');
-            const timestamp = new Date().toLocaleTimeString();
-            const logEntry = `[${timestamp}] ${message}${data ? ' ' + JSON.stringify(data) : ''}`;
-            debugContent.innerHTML = logEntry + '<br>' + debugContent.innerHTML;
-
-            // Limitar a 10 líneas
-            const lines = debugContent.innerHTML.split('<br>');
-            if (lines.length > 10) {
-                debugContent.innerHTML = lines.slice(0, 10).join('<br>');
-            }
         }
 
         async init() {
             try {
-                this.debugLog('🚀 Player initializing...');
+                window.debugLog('🚀 Player initializing...');
+                window.lvhState.isLoading = true;
+
+                // ✅ SETUP P2P ENGINE
+                await this.setupP2PEngine();
+
+                // ✅ SETUP VIDSTACK PLAYER
                 await this.setupPlayer();
+
+                // ✅ SETUP COMMUNICATION
                 this.setupMessageListener();
+
+                // ✅ REGISTER GLOBALLY
+                window.lvhState.playerInstance = this;
+                window.lvhState.isInitialized = true;
+                window.lvhState.isLoading = false;
+
                 this.notifyFlutter('player_ready');
-                this.debugLog('✅ Player initialized successfully');
+                window.debugLog('✅ Player initialized successfully');
+
             } catch (error) {
-                this.debugLog('❌ Failed to initialize player:', error);
-                this.showError('Error al inicializar el reproductor');
+                window.debugLog('❌ Failed to initialize player:', error);
+                this.showError('Error al inicializar el reproductor P2P');
+                window.lvhState.hasError = true;
+                window.lvhState.isLoading = false;
+            }
+        }
+
+        async setupP2PEngine() {
+            try {
+                window.debugLog('🔥 Setting up P2P engine...');
+
+                const isP2PSupported = HTMLScriptElement.supports("importmap") && Hls.isSupported();
+
+                if (isP2PSupported) {
+                    this.HlsWithP2P = HlsJsP2PEngine.injectMixin(Hls);
+                    window.debugLog('✅ P2P HLS engine created successfully');
+                    this.setState('connecting');
+                } else {
+                    window.debugLog('⚠️ P2P not supported, using regular HLS');
+                    this.HlsWithP2P = Hls;
+                    this.setState('disabled');
+                }
+
+            } catch (error) {
+                window.debugLog('❌ P2P setup failed:', error);
+                this.HlsWithP2P = Hls;
+                this.setState('error');
             }
         }
 
         async setupPlayer() {
-            this.debugLog('📺 Creating Vidstack player...');
+            window.debugLog('📺 Creating Vidstack player...');
 
             this.player = await VidstackPlayer.create({
                 target: "#player",
@@ -236,49 +409,234 @@
             });
 
             this.setupPlayerEvents();
-            this.debugLog('📺 Vidstack player created successfully');
+            window.debugLog('📺 Vidstack player created successfully');
+        }
+
+        setupPlayerEvents() {
+            // ✅ PROVIDER CHANGE - KEY EVENT
+            this.player.addEventListener('provider-change', (event) => {
+                const provider = event.detail;
+                window.debugLog('📺 Provider changed:', provider?.type || 'undefined');
+
+                if (provider?.type === 'hls') {
+                    window.debugLog('🔥 Configuring HLS provider with P2P...');
+                    provider.library = this.HlsWithP2P;
+
+                    provider.config = {
+                        p2p: {
+                            core: {
+                                swarmId: this.currentUrl ? this.generateSwarmId(this.currentUrl) : 'livevaulthub_default',
+                                announceTrackers: [
+                                    "wss://tracker.novage.com.ua:443/announce",
+                                    "wss://tracker.webtorrent.dev:443/announce",
+                                    // ✅ REMOVER tracker problemático
+                                    // "wss://openwebtorrent.com:443/announce",
+                                ],
+                            },
+                            onHlsJsCreated: (hls) => {
+                                window.debugLog('🔥 HLS.js instance created with P2P');
+                                this.hlsInstance = hls;
+                                this.setupP2PEventListeners(hls);
+
+                                // ✅ TAMBIÉN SETUP HLS EVENTS
+                                this.setupHLSEvents(hls);
+                            },
+                        },
+                    };
+                }
+            });
+
+            // ✅ VIDEO EVENTS - VIDSTACK SPECIFIC
+            this.player.addEventListener('loadstart', () => {
+                window.debugLog('📺 Video load started');
+                this.notifyFlutter('video_loading', { url: this.currentUrl });
+            });
+
+            this.player.addEventListener('loadedmetadata', () => {
+                window.debugLog('📺 Video metadata loaded - HIDING LOADING');
+                this.hideLoading();
+                this.notifyFlutter('loadedmetadata', {
+                    duration: this.player.duration || 0
+                });
+            });
+
+            this.player.addEventListener('can-play', () => {
+                window.debugLog('📺 Video can play');
+                this.hideLoading(); // ✅ TAMBIÉN AQUÍ
+                this.notifyFlutter('video_ready');
+            });
+
+            this.player.addEventListener('play', () => {
+                window.debugLog('📺 Video playing');
+                this.notifyFlutter('play');
+            });
+
+            this.player.addEventListener('pause', () => {
+                window.debugLog('📺 Video paused');
+                this.notifyFlutter('pause');
+            });
+
+            this.player.addEventListener('time-update', () => {
+                this.notifyFlutter('timeupdate', {
+                    currentTime: this.player.currentTime || 0
+                });
+            });
+
+            this.player.addEventListener('ended', () => {
+                window.debugLog('📺 Video ended');
+                this.notifyFlutter('ended');
+            });
+
+            this.player.addEventListener('error', (e) => {
+                window.debugLog('❌ Player error:', e);
+                this.showError('Error de reproducción del video');
+                this.notifyFlutter('error', { message: 'Error de reproducción' });
+            });
+
+            // ✅ EVENTOS ADICIONALES PARA DEBUG
+            this.player.addEventListener('provider-setup', (e) => {
+                window.debugLog('🔧 Provider setup:', e.detail);
+            });
+
+            this.player.addEventListener('source-change', (e) => {
+                window.debugLog('🔄 Source change:', e.detail);
+            });
+
+            this.player.addEventListener('media-type-change', (e) => {
+                window.debugLog('📱 Media type change:', e.detail);
+            });
+
+            window.debugLog('✅ Player events configured');
+        }
+
+        setupHLSEvents(hls) {
+            window.debugLog('🎵 Setting up HLS.js events...');
+
+            hls.on(Hls.Events.MANIFEST_PARSED, () => {
+                window.debugLog('📋 HLS: Manifest parsed');
+                this.hideLoading(); // ✅ FORZAR HIDE LOADING AQUÍ
+            });
+
+            hls.on(Hls.Events.LEVEL_LOADED, () => {
+                window.debugLog('📊 HLS: Level loaded');
+            });
+
+            hls.on(Hls.Events.FRAG_LOADED, () => {
+                window.debugLog('📦 HLS: Fragment loaded');
+            });
+
+            hls.on(Hls.Events.ERROR, (event, data) => {
+                window.debugLog('❌ HLS Error:', data);
+                if (data.fatal) {
+                    this.showError('Error crítico en HLS: ' + data.type);
+                }
+            });
+
+            window.debugLog('✅ HLS events configured');
+        }
+
+        setupP2PEventListeners(hls) {
+            if (!hls.p2pEngine) {
+                window.debugLog('⚠️ No P2P engine in HLS instance');
+                return;
+            }
+
+            this.p2pEngine = hls.p2pEngine;
+
+            this.p2pEngine.addEventListener("onPeerConnect", (details) => {
+                window.debugLog('🤝 Peer connected:', details.peerId);
+                this.p2pStats.peers++;
+                this.updateP2PStats();
+                this.setState('connected');
+                this.notifyFlutter('peer_connect', { peerId: details.peerId });
+            });
+
+            this.p2pEngine.addEventListener("onPeerDisconnect", (details) => {
+                window.debugLog('💔 Peer disconnected:', details.peerId);
+                this.p2pStats.peers = Math.max(0, this.p2pStats.peers - 1);
+                this.updateP2PStats();
+                this.notifyFlutter('peer_disconnect', { peerId: details.peerId });
+            });
+
+            this.p2pEngine.addEventListener("onSegmentLoaded", (details) => {
+                if (Math.random() < 0.1) {
+                    window.debugLog('📦 Segment loaded via:', details.source);
+                }
+
+                if (details.source === 'p2p') {
+                    this.p2pStats.downloaded += details.bytes || 0;
+                    this.setState('sharing');
+                }
+
+                this.updateP2PStats();
+                this.notifyFlutter('segment_loaded', {
+                    source: details.source,
+                    bytes: details.bytes
+                });
+            });
+
+            window.debugLog('✅ P2P event listeners configured');
+        }
+
+        generateSwarmId(url) {
+            const cleanUrl = url.split('?')[0];
+            return `livevaulthub_${btoa(cleanUrl).slice(0, 16)}`;
+        }
+
+        updateP2PStats() {
+            const peerCountEl = document.getElementById('peer-count');
+            const downloadedEl = document.getElementById('downloaded');
+            const ratioEl = document.getElementById('p2p-ratio');
+
+            if (peerCountEl) peerCountEl.textContent = this.p2pStats.peers;
+            if (downloadedEl) downloadedEl.textContent = `${(this.p2pStats.downloaded / 1024 / 1024).toFixed(1)} MB`;
+
+            const ratio = this.p2pStats.downloaded > 0 ? Math.min(80, this.p2pStats.peers * 20) : 0;
+            if (ratioEl) ratioEl.textContent = `${ratio}%`;
+
+            window.lvhState.p2pStats = {
+                peers: this.p2pStats.peers,
+                downloaded: this.p2pStats.downloaded,
+                ratio: ratio
+            };
+
+            this.notifyFlutter('stats_update', {
+                peers: this.p2pStats.peers,
+                downloaded: this.p2pStats.downloaded,
+                ratio: ratio
+            });
         }
 
         setupMessageListener() {
-            this.debugLog('🎬 Setting up message listener...');
+            window.debugLog('🎬 Setting up message listener...');
 
-            // Para web
             if (this.isWeb) {
-                this.debugLog('🌐 Web environment detected');
+                window.debugLog('🌐 Web environment detected');
 
-                // ✅ NUEVO: DOM EVENT LISTENER PARA FLUTTER
-                this.debugLog('🔧 Setting up DOM event listener for flutter-message...');
+                // ✅ DOM EVENT LISTENER
                 document.addEventListener('flutter-message', (event) => {
-                    this.debugLog('📨 DOM Event received:', event.detail);
+                    window.debugLog('📨 DOM Event received:', event.detail);
                     this.handleFlutterMessage(event.detail);
                 });
 
-                // Fallback: window message listener
+                // ✅ WINDOW MESSAGE LISTENER
                 window.addEventListener('message', (event) => {
                     if (event.data && event.data.action) {
-                        this.debugLog('📥 Received window message from Flutter:', event.data);
+                        window.debugLog('📥 Window message received:', event.data);
                         this.handleFlutterMessage(event.data);
                     }
                 });
 
-                // Función global para enviar mensajes
-                window.sendToFlutter = (data) => {
-                    this.debugLog('📤 Sending via postMessage:', data);
-                    window.postMessage(data, '*');
-                };
-
-                // Test inmediato de comunicación
                 setTimeout(() => {
-                    this.debugLog('🧪 Testing communication...');
+                    window.debugLog('🧪 Testing communication...');
                     this.notifyFlutter('player_ready');
                 }, 100);
 
-                this.debugLog('✅ DOM event listener configured');
+                window.debugLog('✅ Message listeners configured');
             }
 
-            // Para móvil
             if (window.flutter_inappwebview) {
-                this.debugLog('📱 Mobile environment detected');
+                window.debugLog('📱 Mobile environment detected');
                 window.flutter_inappwebview.callHandler('FlutterBridge', JSON.stringify({
                     type: 'player_ready',
                     timestamp: Date.now()
@@ -286,53 +644,10 @@
             }
         }
 
-        setupPlayerEvents() {
-            this.player.addEventListener('provider-change', (event) => {
-                const provider = event.detail;
-                this.debugLog('📺 Provider changed:', provider?.type || 'undefined');
-            });
-
-            this.player.addEventListener('loadstart', () => {
-                this.debugLog('📺 Video load started');
-                this.notifyFlutter('video_loading', { url: this.currentUrl });
-            });
-
-            this.player.addEventListener('loadedmetadata', () => {
-                this.debugLog('📺 Video metadata loaded');
-                this.hideLoading();
-                this.notifyFlutter('loadedmetadata', {
-                    duration: this.player.duration || 0
-                });
-            });
-
-            this.player.addEventListener('canplay', () => {
-                this.debugLog('📺 Video can play');
-                this.notifyFlutter('video_ready');
-            });
-
-            this.player.addEventListener('play', () => {
-                this.debugLog('📺 Video playing');
-                this.notifyFlutter('play');
-            });
-
-            this.player.addEventListener('pause', () => {
-                this.debugLog('📺 Video paused');
-                this.notifyFlutter('pause');
-            });
-
-            this.player.addEventListener('error', (e) => {
-                this.debugLog('❌ Player error:', e);
-                this.showError('Error de reproducción del video');
-                this.notifyFlutter('error', { message: 'Error de reproducción' });
-            });
-
-            this.debugLog('✅ Player events configured');
-        }
-
-        // ✅ MÉTODO PRINCIPAL CORREGIDO
+        // ✅ LOAD VIDEO - MAIN METHOD
         async loadVideo(url, options = {}) {
             try {
-                this.debugLog('📹 LOADING VIDEO CALLED!', {
+                window.debugLog('📹 LOAD VIDEO CALLED!', {
                     url: url,
                     options: options,
                     playerExists: !!this.player
@@ -340,23 +655,31 @@
 
                 this.currentUrl = url;
                 this.isLive = options.isLive || url.includes('.m3u8');
+                window.lvhState.currentUrl = url;
 
                 this.showLoading();
                 this.hideError();
 
-                // ✅ VERIFICAR QUE EL PLAYER EXISTE
                 if (!this.player) {
                     throw new Error('Player not initialized');
                 }
 
-                this.debugLog('🎯 Setting player.src...', { url });
+                window.debugLog('🎯 Setting player.src = ' + url);
 
-                // ✅ ASIGNAR URL AL PLAYER
+                // ✅ ASSIGN URL TO PLAYER
                 this.player.src = url;
 
-                this.debugLog('✅ Player.src assigned successfully');
+                window.debugLog('✅ Player.src assigned - should trigger provider-change');
 
                 this.setState('connecting');
+
+                // ✅ TIMEOUT PARA FORZAR HIDE LOADING SI NO LLEGAN EVENTOS
+                setTimeout(() => {
+                    if (document.getElementById('loading') && !document.getElementById('loading').classList.contains('hidden')) {
+                        window.debugLog('⏰ Timeout: Forcing hide loading after 10 seconds');
+                        this.hideLoading();
+                    }
+                }, 10000);
 
                 this.notifyFlutter('video_loading', {
                     url: url,
@@ -364,27 +687,31 @@
                 });
 
             } catch (error) {
-                this.debugLog('❌ Error in loadVideo:', error);
+                window.debugLog('❌ Error in loadVideo:', error);
                 this.showError('Error al cargar el video: ' + error.message);
                 this.notifyFlutter('error', { message: error.message });
             }
         }
 
         play() {
-            this.debugLog('▶️ Play called');
-            this.player?.play().catch(e => {
-                this.debugLog('❌ Play failed:', e);
-                this.showError('No se pudo reproducir el video');
-            });
+            window.debugLog('▶️ Play called');
+            if (this.player) {
+                this.player.play().catch(e => {
+                    window.debugLog('❌ Play failed:', e);
+                    this.showError('No se pudo reproducir el video');
+                });
+            }
         }
 
         pause() {
-            this.debugLog('⏸️ Pause called');
-            this.player?.pause();
+            window.debugLog('⏸️ Pause called');
+            if (this.player) {
+                this.player.pause();
+            }
         }
 
         seekTo(time) {
-            this.debugLog('⏩ Seek called:', time);
+            window.debugLog('⏩ Seek called:', time);
             if (this.player) {
                 this.player.currentTime = time;
             }
@@ -394,30 +721,45 @@
             if (this.currentState === newState) return;
 
             this.currentState = newState;
-            this.debugLog('🔄 State changed:', newState);
+            window.debugLog('🔄 State changed:', newState);
 
-            document.getElementById('p2p-status').textContent = newState;
+            const statusEl = document.getElementById('p2p-status');
+            if (statusEl) statusEl.textContent = newState;
+
             this.notifyFlutter('state_changed', { state: newState });
         }
 
         showLoading() {
-            document.getElementById('loading').classList.remove('hidden');
+            const loadingEl = document.getElementById('loading');
+            if (loadingEl) {
+                loadingEl.classList.remove('hidden');
+                window.debugLog('⏳ Loading overlay shown');
+            }
         }
 
         hideLoading() {
-            document.getElementById('loading').classList.add('hidden');
+            const loadingEl = document.getElementById('loading');
+            if (loadingEl) {
+                loadingEl.classList.add('hidden');
+                window.debugLog('✅ Loading overlay hidden');
+            }
         }
 
         showError(message) {
-            this.debugLog('❌ Showing error:', message);
-            document.getElementById('error-message').textContent = message;
-            document.getElementById('error').classList.remove('hidden');
+            window.debugLog('❌ Showing error:', message);
+            const errorEl = document.getElementById('error');
+            const errorMsgEl = document.getElementById('error-message');
+
+            if (errorMsgEl) errorMsgEl.textContent = message;
+            if (errorEl) errorEl.classList.remove('hidden');
+
             this.hideLoading();
             this.notifyFlutter('error', { message });
         }
 
         hideError() {
-            document.getElementById('error').classList.add('hidden');
+            const errorEl = document.getElementById('error');
+            if (errorEl) errorEl.classList.add('hidden');
         }
 
         notifyFlutter(type, data = {}) {
@@ -428,89 +770,73 @@
             };
 
             try {
-                // Para móvil/desktop
                 if (window.flutter_inappwebview) {
                     window.flutter_inappwebview.callHandler('FlutterBridge', JSON.stringify(message));
                 }
 
-                // Para web
-                if (window.sendToFlutter) {
-                    window.sendToFlutter(message);
-                } else if (window.parent && window.parent.postMessage) {
-                    window.parent.postMessage(message, '*');
-                }
-
-                this.debugLog('📤 Sent to Flutter:', { type, data });
+                window.sendToFlutter(message);
+                window.debugLog('📤 Sent to Flutter:', { type, data });
             } catch (error) {
-                this.debugLog('❌ Error sending to Flutter:', error);
+                window.debugLog('❌ Error sending to Flutter:', error);
             }
         }
 
-        // ✅ MANEJO DE MENSAJES MEJORADO
+        // ✅ HANDLE FLUTTER MESSAGES
         handleFlutterMessage(messageData) {
             try {
-                this.debugLog('📥 RAW MESSAGE RECEIVED:', messageData);
+                window.debugLog('📥 PROCESSING MESSAGE:', messageData);
 
                 const data = typeof messageData === 'string' ? JSON.parse(messageData) : messageData;
-                this.debugLog('📥 PARSED MESSAGE:', data);
+                window.debugLog('📥 PARSED MESSAGE:', data);
 
                 switch(data.action) {
                     case 'loadVideo':
-                        this.debugLog('🎯 LOAD VIDEO ACTION RECEIVED!', {
+                        window.debugLog('🎯 LOAD VIDEO ACTION - EXECUTING!', {
                             url: data.url,
                             options: data.options
                         });
                         this.loadVideo(data.url, data.options || {});
                         break;
                     case 'play':
-                        this.debugLog('▶️ PLAY ACTION RECEIVED');
+                        window.debugLog('▶️ PLAY ACTION');
                         this.play();
                         break;
                     case 'pause':
-                        this.debugLog('⏸️ PAUSE ACTION RECEIVED');
+                        window.debugLog('⏸️ PAUSE ACTION');
                         this.pause();
                         break;
                     case 'seekTo':
-                        this.debugLog('⏩ SEEK ACTION RECEIVED:', data.time);
+                        window.debugLog('⏩ SEEK ACTION:', data.time);
                         this.seekTo(data.time);
                         break;
                     default:
-                        this.debugLog('❓ Unknown action:', data.action);
+                        window.debugLog('❓ Unknown action:', data.action);
                 }
             } catch (error) {
-                this.debugLog('❌ Error handling Flutter message:', error);
+                window.debugLog('❌ Error handling Flutter message:', error);
             }
         }
     }
 
-    // Global functions
-    window.retryLoad = function() {
-        window.lvhPlayer?.debugLog('🔄 Retry load called');
-        if (window.lvhPlayer && window.lvhPlayer.currentUrl) {
-            window.lvhPlayer.loadVideo(window.lvhPlayer.currentUrl);
-        }
-    };
-
-    window.sendMessageToPlayer = function(message) {
-        window.lvhPlayer?.debugLog('📨 sendMessageToPlayer called:', message);
-        if (window.lvhPlayer) {
-            window.lvhPlayer.handleFlutterMessage(message);
-        }
-    };
-
-    // ✅ TEST GLOBAL PARA DEBUG
-    window.testLoadVideo = function() {
-        if (window.lvhPlayer) {
-            window.lvhPlayer.debugLog('🧪 Testing loadVideo manually...');
-            window.lvhPlayer.loadVideo('https://fcc3ddae59ed.us-west-2.playback.live-video.net/api/video/v1/us-west-2.893648527354.channel.DmumNckWFTqz.m3u8');
-        }
-    };
-
-    // Initialize player
+    // ✅ CREATE PLAYER INSTANCE
     window.addEventListener('load', () => {
         console.log('🚀 Window load event - Creating player...');
-        window.lvhPlayer = new LiveVaultHubPlayer();
+
+        try {
+            const player = new LiveVaultHubPlayer();
+            window.debugLog('✅ Player instance created and registered globally');
+        } catch (error) {
+            console.error('❌ Failed to create player:', error);
+            window.debugLog('❌ Failed to create player instance:', error);
+        }
     });
+
+    // ✅ HEARTBEAT FOR MONITORING
+    setInterval(() => {
+        if (window.lvhState.isInitialized) {
+            window.debugLog(`💓 Heartbeat - Player: ${window.lvhState.isInitialized ? 'Ready' : 'Not Ready'}, URL: ${window.lvhState.currentUrl || 'None'}`);
+        }
+    }, 30000);
 </script>
 </body>
 </html>
