@@ -1,3 +1,5 @@
+// lib/core/services/p2p_service.dart - COMUNICACIÓN WEB COMPLETAMENTE CORREGIDA
+
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
@@ -27,6 +29,9 @@ class P2PService extends ChangeNotifier {
   /// Timer para polling en web
   Timer? _webPollingTimer;
 
+  /// Queue de mensajes para web
+  final List<String> _pendingMessages = [];
+
   /// Constructor
   P2PService() {
     // Inicializar streams con valores por defecto
@@ -52,7 +57,7 @@ class P2PService extends ChangeNotifier {
 
     // Configurar canal de comunicación según plataforma
     if (kIsWeb) {
-      // En web, usamos window.postMessage para comunicación
+      // En web, usamos DOM events + polling
       await _setupWebCommunication();
     } else {
       // En móvil/desktop, usamos JavaScript handler nativo
@@ -70,44 +75,54 @@ class P2PService extends ChangeNotifier {
     P2PUtils.logP2PEvent('Service initialized', {'platform': kIsWeb ? 'web' : 'native'});
   }
 
-  /// Configurar comunicación para web
+  /// ✅ NUEVA COMUNICACIÓN WEB VIA DOM EVENTS
   Future<void> _setupWebCommunication() async {
     try {
-      // En web, inyectamos JavaScript para escuchar mensajes
+      P2PUtils.logP2PEvent('Setting up web communication via DOM events');
+
+      // Setup DOM-based communication
       await _webViewController!.evaluateJavascript(source: '''
-        // Limpiar listeners previos
+        // ✅ NUEVO SISTEMA DE COMUNICACIÓN VIA DOM
+        console.log('🔧 Setting up DOM-based communication...');
+        
+        // Queue para mensajes de Flutter
         window.flutterMessageQueue = [];
         
-        // Configurar listener para recibir mensajes del player
-        window.addEventListener('message', function(event) {
-          if (event.data && event.data.type) {
-            console.log('Flutter received:', event.data);
-            window.flutterMessageQueue = window.flutterMessageQueue || [];
-            window.flutterMessageQueue.push(JSON.stringify(event.data));
+        // Queue para mensajes hacia Flutter  
+        window.toFlutterQueue = [];
+        
+        // ✅ LISTENER PARA EVENTOS DOM PERSONALIZADOS
+        document.addEventListener('flutter-message', function(event) {
+          console.log('📨 DOM Event received:', event.detail);
+          
+          if (window.lvhPlayer && window.lvhPlayer.handleFlutterMessage) {
+            window.lvhPlayer.handleFlutterMessage(event.detail);
+          } else {
+            console.log('⚠️ Player not ready, queuing message');
+            window.flutterMessageQueue.push(event.detail);
           }
         });
         
-        // Función global para que el player envíe mensajes
+        // ✅ FUNCIÓN PARA QUE EL PLAYER ENVÍE MENSAJES
         window.sendToFlutter = function(data) {
-          console.log('Sending to Flutter:', data);
-          window.flutterMessageQueue = window.flutterMessageQueue || [];
-          window.flutterMessageQueue.push(JSON.stringify(data));
+          console.log('📤 Sending to Flutter via DOM:', data);
+          window.toFlutterQueue.push(JSON.stringify(data));
         };
         
-        // Forzar notificación de player ready
-        setTimeout(() => {
-          if (window.lvhPlayer) {
-            window.sendToFlutter({type: 'player_ready', timestamp: Date.now()});
-          } else {
-            console.log('Player not found, will retry...');
+        // ✅ FUNCIÓN PARA PROCESAR MENSAJES PENDIENTES
+        window.processQueuedMessages = function() {
+          if (window.lvhPlayer && window.flutterMessageQueue.length > 0) {
+            console.log('🔄 Processing', window.flutterMessageQueue.length, 'queued messages');
+            const messages = window.flutterMessageQueue.splice(0);
+            messages.forEach(msg => window.lvhPlayer.handleFlutterMessage(msg));
           }
-        }, 2000);
+        };
         
-        console.log('Web communication setup complete');
+        console.log('✅ DOM communication setup complete');
         true;
       ''');
 
-      // Iniciar polling inmediatamente
+      // Iniciar polling para mensajes bidireccionales
       _startWebMessagePolling();
 
       // Timeout para forzar player ready si no llega
@@ -118,26 +133,27 @@ class P2PService extends ChangeNotifier {
         }
       });
 
-      P2PUtils.logP2PEvent('Web communication setup successful');
+      P2PUtils.logP2PEvent('Web DOM communication setup successful');
     } catch (e) {
       P2PUtils.logP2PError('Web communication setup failed', e);
       _updateState(P2PState.disabled);
     }
   }
 
-  /// Polling de mensajes para web
+  /// ✅ POLLING MEJORADO PARA WEB
   void _startWebMessagePolling() {
     _webPollingTimer?.cancel();
-    _webPollingTimer = Timer.periodic(const Duration(milliseconds: 100), (timer) async {
+    _webPollingTimer = Timer.periodic(const Duration(milliseconds: 200), (timer) async {
       if (_webViewController == null) {
         timer.cancel();
         return;
       }
 
       try {
+        // Recibir mensajes del player
         final result = await _webViewController!.evaluateJavascript(source: '''
-          if (window.flutterMessageQueue && window.flutterMessageQueue.length > 0) {
-            const messages = window.flutterMessageQueue.splice(0);
+          if (window.toFlutterQueue && window.toFlutterQueue.length > 0) {
+            const messages = window.toFlutterQueue.splice(0);
             JSON.stringify(messages);
           } else {
             null;
@@ -156,6 +172,16 @@ class P2PService extends ChangeNotifier {
             P2PUtils.logP2PDebug('Error parsing web messages: $e');
           }
         }
+
+        // Procesar mensajes pendientes si el player ya está listo
+        if (_isInitialized) {
+          await _webViewController!.evaluateJavascript(source: '''
+            if (window.processQueuedMessages) {
+              window.processQueuedMessages();
+            }
+          ''');
+        }
+
       } catch (e) {
         // Ignorar errores de polling silenciosamente
       }
@@ -178,101 +204,71 @@ class P2PService extends ChangeNotifier {
       'isInitialized': _isInitialized,
     });
 
-    if (kIsWeb) {
-      // En web, cargar video directamente sin P2P complejo
-      await _loadVideoWeb(url);
-    } else {
-      // En móvil, usar configuración P2P completa
-      final message = P2PUtils.createWebViewMessage('loadVideo', {
-        'url': url,
-        'p2pConfig': _currentConfig!.toJson(),
-      });
-      await _sendToWebView(message);
-    }
-  }
+    final message = {
+      'action': 'loadVideo',
+      'url': url,
+      'options': {
+        'isLive': url.contains('.m3u8'),
+        'enableP2P': _currentConfig!.isP2PEnabled,
+      },
+      'timestamp': DateTime.now().millisecondsSinceEpoch,
+    };
 
-  /// Cargar video específico para web
-  Future<void> _loadVideoWeb(String url) async {
-    try {
-      await _webViewController!.evaluateJavascript(source: '''
-        console.log('Loading video in web:', '$url');
-        
-        if (window.lvhPlayer) {
-          window.lvhPlayer.loadVideo('$url', {
-            isLive: ${url.contains('.m3u8')},
-            enableP2P: false  // Simplificar para web
-          });
-        } else {
-          console.error('Player not ready for video load');
-          // Reintentar en 1 segundo
-          setTimeout(() => {
-            if (window.lvhPlayer) {
-              window.lvhPlayer.loadVideo('$url', {isLive: ${url.contains('.m3u8')}});
-            }
-          }, 1000);
-        }
-      ''');
+    P2PUtils.logP2PEvent('Sending loadVideo message', {
+      'message': json.encode(message),
+      'platform': kIsWeb ? 'web' : 'native',
+    });
 
-      P2PUtils.logP2PEvent('Web video load initiated', {'url': url});
-    } catch (e) {
-      P2PUtils.logP2PError('Web video load failed', e);
-      throw e;
-    }
+    await _sendToWebView(message);
   }
 
   /// Controles de reproducción
   Future<void> play() async {
-    await _sendToWebView(P2PUtils.createWebViewMessage('play'));
+    await _sendToWebView({'action': 'play', 'timestamp': DateTime.now().millisecondsSinceEpoch});
   }
 
   Future<void> pause() async {
-    await _sendToWebView(P2PUtils.createWebViewMessage('pause'));
+    await _sendToWebView({'action': 'pause', 'timestamp': DateTime.now().millisecondsSinceEpoch});
   }
 
   Future<void> seekTo(double time) async {
-    await _sendToWebView(P2PUtils.createWebViewMessage('seekTo', {
+    await _sendToWebView({
+      'action': 'seekTo',
       'time': time,
-    }));
+      'timestamp': DateTime.now().millisecondsSinceEpoch,
+    });
   }
 
   Future<void> setVolume(double volume) async {
-    await _sendToWebView(P2PUtils.createWebViewMessage('setVolume', {
+    await _sendToWebView({
+      'action': 'setVolume',
       'volume': volume,
-    }));
+      'timestamp': DateTime.now().millisecondsSinceEpoch,
+    });
   }
 
   /// Configuración P2P dinámica
   Future<void> enableP2P() async {
-    await _sendToWebView(P2PUtils.createWebViewMessage('enableP2P'));
+    await _sendToWebView({'action': 'enableP2P', 'timestamp': DateTime.now().millisecondsSinceEpoch});
   }
 
   Future<void> disableP2P() async {
-    await _sendToWebView(P2PUtils.createWebViewMessage('disableP2P'));
+    await _sendToWebView({'action': 'disableP2P', 'timestamp': DateTime.now().millisecondsSinceEpoch});
     _updateState(P2PState.disabled);
-  }
-
-  Future<void> updateP2PConfig(P2PConfig config) async {
-    _currentConfig = config;
-    await _sendToWebView(P2PUtils.createWebViewMessage('updateConfig', {
-      'config': config.toJson(),
-    }));
-  }
-
-  /// Obtener estadísticas de rendimiento
-  Map<String, dynamic> getPerformanceStats() {
-    return P2PUtils.calculatePerformanceStats(_currentStats);
   }
 
   /// Toggle estadísticas P2P en UI
   Future<void> toggleP2PStats(bool show) async {
-    await _sendToWebView(P2PUtils.createWebViewMessage('toggleStats', {
+    await _sendToWebView({
+      'action': 'toggleStats',
       'show': show,
-    }));
+      'timestamp': DateTime.now().millisecondsSinceEpoch,
+    });
   }
 
   /// Manejo de mensajes del WebView
   void _handleWebViewMessage(String message) {
-    if (P2PUtils.shouldThrottleEvent('webview_message', throttleMs: 100)) {
+    if (P2PUtils.shouldThrottleEvent('webview_message', throttleMs: 50)) {
       return;
     }
 
@@ -295,18 +291,30 @@ class P2PService extends ChangeNotifier {
       case P2PEventType.playerReady:
         _isInitialized = true;
         P2PUtils.logP2PEvent('Player ready');
+
+        // Procesar mensajes pendientes
+        _processPendingMessages();
+        break;
+
+      case P2PEventType.videoLoading:
+        P2PUtils.logP2PEvent('Video loading started');
+        break;
+
+      case P2PEventType.videoReady:
+        P2PUtils.logP2PEvent('Video ready');
         break;
 
       case P2PEventType.stateChanged:
-        final newState = P2PState.values.firstWhere(
-              (state) => state.name == event.data['state'],
-          orElse: () => P2PState.error,
-        );
+        final stateString = event.data['state'] ?? '';
+        final newState = _parseStateFromString(stateString);
         _updateState(newState);
         break;
 
       case P2PEventType.statsUpdate:
-        _updateStats(P2PStats.fromJson(event.data['stats'] ?? {}));
+        final statsData = event.data['stats'];
+        if (statsData != null) {
+          _updateStats(P2PStats.fromJson(Map<String, dynamic>.from(statsData)));
+        }
         break;
 
       case P2PEventType.peerConnect:
@@ -331,7 +339,11 @@ class P2PService extends ChangeNotifier {
         break;
 
       case P2PEventType.error:
-        final error = P2PError.fromJson(event.data);
+        final error = P2PError(
+          code: event.data['code'] ?? 'UNKNOWN',
+          message: event.data['message'] ?? 'Error desconocido',
+          details: event.data,
+        );
         _errorController.add(error);
         _updateState(P2PState.error);
         P2PUtils.logP2PError('P2P Error', error);
@@ -343,6 +355,26 @@ class P2PService extends ChangeNotifier {
     }
 
     notifyListeners();
+  }
+
+  /// Parse estado desde string
+  P2PState _parseStateFromString(String stateString) {
+    switch (stateString.toLowerCase()) {
+      case 'connecting':
+        return P2PState.connecting;
+      case 'connected':
+        return P2PState.connected;
+      case 'sharing':
+        return P2PState.sharing;
+      case 'error':
+        return P2PState.error;
+      case 'disabled':
+        return P2PState.disabled;
+      case 'stopped':
+        return P2PState.stopped;
+      default:
+        return P2PState.initializing;
+    }
   }
 
   /// Actualizar estado P2P
@@ -373,35 +405,77 @@ class P2PService extends ChangeNotifier {
     }
   }
 
-  /// Enviar mensaje al WebView
-  Future<void> _sendToWebView(String message) async {
+  /// ✅ ENVÍO DE MENSAJES COMPLETAMENTE REESCRITO PARA WEB
+  Future<void> _sendToWebView(Map<String, dynamic> messageData) async {
     if (_webViewController == null) return;
+
+    final messageJson = json.encode(messageData);
 
     try {
       if (kIsWeb) {
-        // En web, enviamos mensaje directamente al player
+        // ✅ NUEVO MÉTODO: DOM EVENTS
+        P2PUtils.logP2PEvent('Sending message via DOM event', {'message': messageJson});
+
+        // Si el player no está listo, guardar mensaje
+        if (!_isInitialized) {
+          _pendingMessages.add(messageJson);
+          P2PUtils.logP2PEvent('Player not ready, message queued', {'pendingCount': _pendingMessages.length});
+          return;
+        }
+
         await _webViewController!.evaluateJavascript(source: '''
-          if (window.lvhPlayer && window.lvhPlayer.handleFlutterMessage) {
-            window.lvhPlayer.handleFlutterMessage($message);
-          } else if (window.sendMessageToPlayer) {
-            window.sendMessageToPlayer($message);
-          } else {
-            console.log('Player not ready for message:', $message);
-          }
+          console.log('🚀 Dispatching DOM event with message:', ${json.encode(messageData)});
+          
+          // Crear y disparar evento DOM personalizado
+          const event = new CustomEvent('flutter-message', {
+            detail: ${json.encode(messageData)}
+          });
+          
+          document.dispatchEvent(event);
+          console.log('✅ DOM event dispatched successfully');
         ''');
       } else {
-        // En plataformas nativas, usamos el método original
+        // Para móvil/desktop - método original
         await _webViewController!.evaluateJavascript(source: '''
           if (window.lvhPlayer && window.lvhPlayer.handleFlutterMessage) {
-            window.lvhPlayer.handleFlutterMessage($message);
+            window.lvhPlayer.handleFlutterMessage($messageJson);
+          } else if (window.sendMessageToPlayer) {
+            window.sendMessageToPlayer($messageJson);
           } else {
-            console.log('Player not ready for message: $message');
+            console.log('Player not ready for message: $messageJson');
           }
         ''');
       }
+
+      P2PUtils.logP2PEvent('Message sent successfully');
     } catch (e) {
       P2PUtils.logP2PError('Error sending to WebView', e);
     }
+  }
+
+  /// Procesar mensajes pendientes cuando el player esté listo
+  Future<void> _processPendingMessages() async {
+    if (_pendingMessages.isEmpty || !kIsWeb) return;
+
+    P2PUtils.logP2PEvent('Processing pending messages', {'count': _pendingMessages.length});
+
+    for (final messageJson in _pendingMessages) {
+      try {
+        final messageData = json.decode(messageJson) as Map<String, dynamic>;
+        await _sendToWebView(messageData);
+        // Pequeña pausa entre mensajes
+        await Future.delayed(const Duration(milliseconds: 100));
+      } catch (e) {
+        P2PUtils.logP2PError('Error processing pending message', e);
+      }
+    }
+
+    _pendingMessages.clear();
+  }
+
+  /// Obtener estadísticas de rendimiento
+  Map<String, dynamic> getPerformanceStats() {
+    return P2PUtils.calculatePerformanceStats(_currentStats);
   }
 
   /// Métodos de conveniencia para UI
@@ -439,6 +513,7 @@ class P2PService extends ChangeNotifier {
     return {
       'state': _currentState.name,
       'initialized': _isInitialized,
+      'pending_messages': _pendingMessages.length,
       'config': _currentConfig?.toJson(),
       'stats': {
         'peers': _currentStats.peers,
@@ -457,8 +532,9 @@ class P2PService extends ChangeNotifier {
 
     _updateState(P2PState.initializing);
     _updateStats(P2PStats.empty);
+    _pendingMessages.clear();
 
-    await _sendToWebView(P2PUtils.createWebViewMessage('restart'));
+    await _sendToWebView({'action': 'restart', 'timestamp': DateTime.now().millisecondsSinceEpoch});
   }
 
   /// Cleanup y dispose
@@ -467,6 +543,7 @@ class P2PService extends ChangeNotifier {
     P2PUtils.logP2PEvent('Service disposing');
 
     _webPollingTimer?.cancel();
+    _pendingMessages.clear();
     _eventController.close();
     _statsController.close();
     _stateController.close();

@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LiveVaultHub P2P Player</title>
+    <title>LiveVaultHub P2P Player - Debug Version</title>
 
     <!-- Import Maps for P2P Media Loader -->
     <script type="importmap">
@@ -50,6 +50,22 @@
             --media-focus-ring: #8B5CF6;
         }
 
+        .debug-panel {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 10px;
+            border-radius: 8px;
+            font-size: 12px;
+            font-family: monospace;
+            z-index: 2000;
+            max-width: 300px;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
         .p2p-stats {
             position: absolute;
             top: 60px;
@@ -69,60 +85,6 @@
 
         .p2p-stats.hidden {
             display: none;
-        }
-
-        .stats-header {
-            display: flex;
-            align-items: center;
-            margin-bottom: 8px;
-            font-weight: bold;
-        }
-
-        .stats-icon {
-            width: 16px;
-            height: 16px;
-            margin-right: 8px;
-        }
-
-        .stat-row {
-            display: flex;
-            justify-content: space-between;
-            margin: 4px 0;
-        }
-
-        .stat-label {
-            color: rgba(255, 255, 255, 0.8);
-        }
-
-        .stat-value {
-            font-weight: bold;
-            color: #00ff88;
-        }
-
-        .connection-status {
-            display: inline-block;
-            width: 8px;
-            height: 8px;
-            border-radius: 50%;
-            margin-right: 6px;
-            animation: pulse 2s infinite;
-        }
-
-        .connection-status.connected {
-            background: #00ff88;
-        }
-
-        .connection-status.connecting {
-            background: #ffaa00;
-        }
-
-        .connection-status.error {
-            background: #ff4444;
-        }
-
-        @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.5; }
         }
 
         .loading-overlay {
@@ -159,17 +121,6 @@
             100% { transform: rotate(360deg); }
         }
 
-        .loading-text {
-            font-size: 18px;
-            font-weight: 600;
-            margin-bottom: 8px;
-        }
-
-        .loading-subtext {
-            font-size: 14px;
-            color: rgba(255, 255, 255, 0.7);
-        }
-
         .error-overlay {
             position: absolute;
             top: 0;
@@ -188,90 +139,37 @@
         .error-overlay.hidden {
             display: none;
         }
-
-        .error-icon {
-            font-size: 48px;
-            margin-bottom: 16px;
-        }
-
-        .error-title {
-            font-size: 20px;
-            font-weight: bold;
-            margin-bottom: 8px;
-        }
-
-        .error-message {
-            font-size: 14px;
-            color: rgba(255, 255, 255, 0.8);
-            margin-bottom: 24px;
-            text-align: center;
-        }
-
-        .retry-button {
-            background: linear-gradient(135deg, #6B46C1, #8B5CF6);
-            color: white;
-            border: none;
-            padding: 12px 24px;
-            border-radius: 8px;
-            font-size: 14px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: transform 0.2s;
-        }
-
-        .retry-button:hover {
-            transform: scale(1.05);
-        }
     </style>
 </head>
 <body>
 <div id="player-container">
+    <!-- Debug Panel -->
+    <div id="debug-panel" class="debug-panel">
+        <div id="debug-content">🔍 Debug Panel Activo</div>
+    </div>
+
     <!-- Loading Overlay -->
     <div id="loading" class="loading-overlay">
         <div class="spinner"></div>
-        <div class="loading-text">🚀 Iniciando LiveVaultHub Player</div>
-        <div class="loading-subtext">Conectando red P2P descentralizada...</div>
+        <div>🚀 Iniciando LiveVaultHub Player</div>
+        <div style="font-size: 14px; margin-top: 8px;">Conectando red P2P...</div>
     </div>
 
     <!-- Error Overlay -->
     <div id="error" class="error-overlay hidden">
-        <div class="error-icon">⚠️</div>
-        <div class="error-title">Error de Reproducción</div>
-        <div class="error-message" id="error-message">No se pudo cargar el video</div>
-        <button class="retry-button" onclick="retryLoad()">Reintentar</button>
+        <div style="font-size: 48px; margin-bottom: 16px;">⚠️</div>
+        <div style="font-size: 20px; font-weight: bold; margin-bottom: 8px;">Error de Reproducción</div>
+        <div id="error-message" style="font-size: 14px; margin-bottom: 24px;">No se pudo cargar el video</div>
+        <button onclick="retryLoad()" style="background: linear-gradient(135deg, #6B46C1, #8B5CF6); color: white; border: none; padding: 12px 24px; border-radius: 8px; cursor: pointer;">Reintentar</button>
     </div>
 
     <!-- P2P Stats -->
     <div id="p2p-stats" class="p2p-stats hidden">
-        <div class="stats-header">
-            <svg class="stats-icon" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2Z"/>
-            </svg>
-            P2P Network
-        </div>
-        <div class="stat-row">
-            <span class="stat-label">Estado:</span>
-            <span class="stat-value">
-                    <span class="connection-status connecting" id="connection-indicator"></span>
-                    <span id="p2p-status">Connecting...</span>
-                </span>
-        </div>
-        <div class="stat-row">
-            <span class="stat-label">Peers:</span>
-            <span class="stat-value" id="peer-count">0</span>
-        </div>
-        <div class="stat-row">
-            <span class="stat-label">Descargado:</span>
-            <span class="stat-value" id="downloaded">0 MB</span>
-        </div>
-        <div class="stat-row">
-            <span class="stat-label">Subido:</span>
-            <span class="stat-value" id="uploaded">0 MB</span>
-        </div>
-        <div class="stat-row">
-            <span class="stat-label">Ratio P2P:</span>
-            <span class="stat-value" id="p2p-ratio">0%</span>
-        </div>
+        <div style="font-weight: bold; margin-bottom: 8px;">P2P Network</div>
+        <div>Estado: <span id="p2p-status">Connecting...</span></div>
+        <div>Peers: <span id="peer-count">0</span></div>
+        <div>Descargado: <span id="downloaded">0 MB</span></div>
+        <div>Ratio P2P: <span id="p2p-ratio">0%</span></div>
     </div>
 
     <!-- Vidstack Player -->
@@ -287,31 +185,49 @@
     class LiveVaultHubPlayer {
         constructor() {
             this.player = null;
-            this.p2pEngine = null;
-            this.hls = null;
             this.currentUrl = null;
             this.isLive = false;
-            this.debug = false;
-            this.p2pStats = null;
+            this.debug = true;
             this.currentState = 'initializing';
+            this.isWeb = typeof window !== 'undefined' && !window.flutter_inappwebview;
+            this.messageQueue = [];
 
+            this.debugLog('🎬 Constructor called', { isWeb: this.isWeb });
             this.init();
+        }
+
+        debugLog(message, data = null) {
+            console.log('[LiveVaultHub]', message, data || '');
+
+            // Mostrar en debug panel
+            const debugContent = document.getElementById('debug-content');
+            const timestamp = new Date().toLocaleTimeString();
+            const logEntry = `[${timestamp}] ${message}${data ? ' ' + JSON.stringify(data) : ''}`;
+            debugContent.innerHTML = logEntry + '<br>' + debugContent.innerHTML;
+
+            // Limitar a 10 líneas
+            const lines = debugContent.innerHTML.split('<br>');
+            if (lines.length > 10) {
+                debugContent.innerHTML = lines.slice(0, 10).join('<br>');
+            }
         }
 
         async init() {
             try {
-                this.log('🚀 LiveVaultHub Player initializing...');
+                this.debugLog('🚀 Player initializing...');
                 await this.setupPlayer();
                 this.setupMessageListener();
                 this.notifyFlutter('player_ready');
-                this.log('✅ Player initialized successfully');
+                this.debugLog('✅ Player initialized successfully');
             } catch (error) {
-                this.logError('❌ Failed to initialize player:', error);
+                this.debugLog('❌ Failed to initialize player:', error);
                 this.showError('Error al inicializar el reproductor');
             }
         }
 
         async setupPlayer() {
+            this.debugLog('📺 Creating Vidstack player...');
+
             this.player = await VidstackPlayer.create({
                 target: "#player",
                 crossOrigin: true,
@@ -320,307 +236,127 @@
             });
 
             this.setupPlayerEvents();
+            this.debugLog('📺 Vidstack player created successfully');
         }
 
         setupMessageListener() {
-            console.log('🎬 Setting up message listener...');
+            this.debugLog('🎬 Setting up message listener...');
 
-            // Para flutter_inappwebview en móvil/desktop
-            if (window.flutter_inappwebview) {
-                console.log('📱 Mobile/Desktop WebView detected');
-                window.flutter_inappwebview.callHandler('FlutterBridge', JSON.stringify({
-                    type: 'player_ready',
-                    timestamp: Date.now()
-                }));
-            }
+            // Para web
+            if (this.isWeb) {
+                this.debugLog('🌐 Web environment detected');
 
-            // Para web - configurar comunicación
-            if (typeof window !== 'undefined') {
-                console.log('🌐 Web environment detected');
+                // ✅ NUEVO: DOM EVENT LISTENER PARA FLUTTER
+                this.debugLog('🔧 Setting up DOM event listener for flutter-message...');
+                document.addEventListener('flutter-message', (event) => {
+                    this.debugLog('📨 DOM Event received:', event.detail);
+                    this.handleFlutterMessage(event.detail);
+                });
 
-                // Escuchar mensajes de Flutter
+                // Fallback: window message listener
                 window.addEventListener('message', (event) => {
                     if (event.data && event.data.action) {
-                        this.log('📥 Received message from Flutter:', event.data);
+                        this.debugLog('📥 Received window message from Flutter:', event.data);
                         this.handleFlutterMessage(event.data);
                     }
                 });
 
-                // Asegurar que sendToFlutter existe
-                if (!window.sendToFlutter) {
-                    window.sendToFlutter = (data) => {
-                        console.log('📤 Sending via postMessage:', data);
-                        window.postMessage(data, '*');
-                    };
-                }
+                // Función global para enviar mensajes
+                window.sendToFlutter = (data) => {
+                    this.debugLog('📤 Sending via postMessage:', data);
+                    window.postMessage(data, '*');
+                };
 
-                // Notificar inmediatamente que estamos listos
+                // Test inmediato de comunicación
                 setTimeout(() => {
+                    this.debugLog('🧪 Testing communication...');
                     this.notifyFlutter('player_ready');
-                    console.log('✅ Player ready notification sent');
                 }, 100);
+
+                this.debugLog('✅ DOM event listener configured');
+            }
+
+            // Para móvil
+            if (window.flutter_inappwebview) {
+                this.debugLog('📱 Mobile environment detected');
+                window.flutter_inappwebview.callHandler('FlutterBridge', JSON.stringify({
+                    type: 'player_ready',
+                    timestamp: Date.now()
+                }));
             }
         }
 
         setupPlayerEvents() {
             this.player.addEventListener('provider-change', (event) => {
                 const provider = event.detail;
-                if (provider?.type === 'hls') {
-                    this.log('📺 HLS provider detected');
-                    // Solo setup P2P en móvil/desktop
-                    if (window.flutter_inappwebview) {
-                        this.setupHLSProvider(provider);
-                    } else {
-                        this.log('🌐 Skipping P2P setup for web');
-                    }
-                }
+                this.debugLog('📺 Provider changed:', provider?.type || 'undefined');
             });
 
             this.player.addEventListener('loadstart', () => {
-                this.log('📺 Video load started');
-                this.notifyFlutter('loadstart');
+                this.debugLog('📺 Video load started');
+                this.notifyFlutter('video_loading', { url: this.currentUrl });
             });
 
             this.player.addEventListener('loadedmetadata', () => {
-                this.log('📺 Video metadata loaded');
+                this.debugLog('📺 Video metadata loaded');
                 this.hideLoading();
                 this.notifyFlutter('loadedmetadata', {
-                    duration: this.player.duration,
-                    videoWidth: this.player.videoWidth,
-                    videoHeight: this.player.videoHeight
+                    duration: this.player.duration || 0
                 });
             });
 
             this.player.addEventListener('canplay', () => {
-                this.log('📺 Video can play');
-                this.notifyFlutter('canplay');
+                this.debugLog('📺 Video can play');
+                this.notifyFlutter('video_ready');
             });
 
             this.player.addEventListener('play', () => {
-                this.log('📺 Video playing');
+                this.debugLog('📺 Video playing');
                 this.notifyFlutter('play');
             });
 
             this.player.addEventListener('pause', () => {
-                this.log('📺 Video paused');
+                this.debugLog('📺 Video paused');
                 this.notifyFlutter('pause');
             });
 
-            this.player.addEventListener('timeupdate', () => {
-                this.notifyFlutter('timeupdate', {
-                    currentTime: this.player.currentTime,
-                    duration: this.player.duration
-                });
-            });
-
-            this.player.addEventListener('ended', () => {
-                this.log('📺 Video ended');
-                this.notifyFlutter('ended');
-            });
-
             this.player.addEventListener('error', (e) => {
-                this.logError('Player error:', e);
+                this.debugLog('❌ Player error:', e);
                 this.showError('Error de reproducción del video');
+                this.notifyFlutter('error', { message: 'Error de reproducción' });
             });
 
-            this.log('✅ Player events configured');
+            this.debugLog('✅ Player events configured');
         }
 
-        async setupHLSProvider(provider) {
-            try {
-                // Verificar soporte de P2P
-                const isP2PSupported = HTMLScriptElement.supports("importmap") && Hls.isSupported();
-
-                if (isP2PSupported) {
-                    this.log('🌐 Setting up P2P for HLS...');
-                    const { HlsJsP2PEngine } = await import("p2p-media-loader-hlsjs");
-                    const HlsWithP2P = HlsJsP2PEngine.injectMixin(window.Hls);
-
-                    provider.library = HlsWithP2P;
-                    provider.config = {
-                        p2p: {
-                            core: {
-                                swarmId: this.generateSwarmId(this.currentUrl),
-                                trackerAnnounce: [
-                                    'wss://tracker.novage.com.ua:443/announce',
-                                    'wss://tracker.webtorrent.dev:443/announce',
-                                    'wss://openwebtorrent.com:443/announce'
-                                ],
-                                rtcConfig: {
-                                    iceServers: [
-                                        { urls: 'stun:stun.l.google.com:19302' },
-                                        { urls: 'stun:global.stun.twilio.com:3478' }
-                                    ]
-                                },
-                                segments: {
-                                    forwardSegmentCount: this.isLive ? 10 : 20
-                                }
-                            },
-                            onHlsJsCreated: (hls) => {
-                                this.hls = hls;
-                                this.p2pEngine = hls.p2pEngine;
-                                this.setupP2PEvents();
-                                this.log('✅ P2P engine created and configured');
-                            }
-                        }
-                    };
-
-                    this.setState('connecting');
-                } else {
-                    this.log('⚠️ P2P not supported, falling back to HTTP');
-                    this.setState('disabled');
-                }
-            } catch (error) {
-                this.logError('❌ P2P setup failed:', error);
-                this.setState('error');
-            }
-        }
-
-        setupP2PEvents() {
-            if (!this.p2pEngine) return;
-
-            this.p2pEngine.addEventListener('onPeerConnect', (params) => {
-                this.log('🤝 Peer connected:', params.peerId);
-                this.updateP2PStats();
-                this.notifyFlutter('peer_connect', { peerId: params.peerId });
-            });
-
-            this.p2pEngine.addEventListener('onPeerClose', (params) => {
-                this.log('👋 Peer disconnected:', params.peerId);
-                this.updateP2PStats();
-                this.notifyFlutter('peer_disconnect', { peerId: params.peerId });
-            });
-
-            this.p2pEngine.addEventListener('onSegmentLoaded', (params) => {
-                this.updateP2PStats();
-                this.notifyFlutter('segment_loaded', {
-                    url: params.segmentUrl,
-                    source: params.downloadSource,
-                    bytes: params.bytesLength
-                });
-            });
-
-            this.p2pEngine.addEventListener('onChunkDownloaded', (params) => {
-                this.notifyFlutter('chunk_downloaded', {
-                    source: params.downloadSource,
-                    bytes: params.bytesLength
-                });
-            });
-
-            // Actualizar estadísticas cada 3 segundos
-            setInterval(() => this.updateP2PStats(), 3000);
-
-            this.setState('connected');
-        }
-
-        updateP2PStats() {
-            if (!this.p2pEngine) return;
-
-            try {
-                const stats = this.p2pEngine.getStats();
-                if (!stats) return;
-
-                this.p2pStats = {
-                    peers: stats.numPeers || 0,
-                    totalHTTPDownloaded: stats.totalHTTPDownloaded || 0,
-                    totalP2PDownloaded: stats.totalP2PDownloaded || 0,
-                    totalP2PUploaded: stats.totalP2PUploaded || 0
-                };
-
-                const total = this.p2pStats.totalHTTPDownloaded + this.p2pStats.totalP2PDownloaded;
-                const p2pRatio = total > 0 ? (this.p2pStats.totalP2PDownloaded / total * 100) : 0;
-
-                // Actualizar UI
-                this.updateStatsUI(this.p2pStats, p2pRatio);
-
-                // Notificar a Flutter
-                this.notifyFlutter('stats_update', {
-                    stats: {
-                        ...this.p2pStats,
-                        p2pRatio: p2pRatio,
-                        totalDownloaded: total
-                    }
-                });
-
-                // Actualizar estado según actividad
-                if (this.p2pStats.peers > 0 && p2pRatio > 0) {
-                    this.setState('sharing');
-                } else if (this.p2pStats.peers > 0) {
-                    this.setState('connected');
-                }
-
-            } catch (error) {
-                this.logError('Error updating P2P stats:', error);
-            }
-        }
-
-        updateStatsUI(stats, p2pRatio) {
-            document.getElementById('peer-count').textContent = stats.peers;
-            document.getElementById('downloaded').textContent =
-                ((stats.totalHTTPDownloaded + stats.totalP2PDownloaded) / 1024 / 1024).toFixed(1) + ' MB';
-            document.getElementById('uploaded').textContent =
-                (stats.totalP2PUploaded / 1024 / 1024).toFixed(1) + ' MB';
-            document.getElementById('p2p-ratio').textContent = p2pRatio.toFixed(1) + '%';
-        }
-
-        setState(newState) {
-            if (this.currentState === newState) return;
-
-            this.currentState = newState;
-            const statusElement = document.getElementById('p2p-status');
-            const indicatorElement = document.getElementById('connection-indicator');
-
-            switch (newState) {
-                case 'connecting':
-                    statusElement.textContent = 'Conectando...';
-                    indicatorElement.className = 'connection-status connecting';
-                    break;
-                case 'connected':
-                    statusElement.textContent = 'Conectado';
-                    indicatorElement.className = 'connection-status connected';
-                    break;
-                case 'sharing':
-                    statusElement.textContent = 'Compartiendo';
-                    indicatorElement.className = 'connection-status connected';
-                    break;
-                case 'error':
-                    statusElement.textContent = 'Error';
-                    indicatorElement.className = 'connection-status error';
-                    break;
-                case 'disabled':
-                    statusElement.textContent = 'Deshabilitado';
-                    indicatorElement.className = 'connection-status error';
-                    break;
-            }
-
-            this.notifyFlutter('state_changed', { state: newState });
-        }
-
-        // API Methods para Flutter
+        // ✅ MÉTODO PRINCIPAL CORREGIDO
         async loadVideo(url, options = {}) {
             try {
+                this.debugLog('📹 LOADING VIDEO CALLED!', {
+                    url: url,
+                    options: options,
+                    playerExists: !!this.player
+                });
+
                 this.currentUrl = url;
                 this.isLive = options.isLive || url.includes('.m3u8');
 
                 this.showLoading();
                 this.hideError();
 
-                this.log('📹 Loading video:', url);
-
-                // En web, usar approach simplificado sin P2P complejo
-                if (typeof window !== 'undefined' && !window.flutter_inappwebview) {
-                    this.log('🌐 Using web-optimized loading');
-                    this.player.src = url;
-
-                    // Simular conexión P2P para consistencia de UI
-                    this.setState('connecting');
-                    setTimeout(() => this.setState('connected'), 1000);
-                    setTimeout(() => this.simulateP2PStats(), 2000);
-                } else {
-                    // En móvil, intentar P2P real
-                    this.log('📱 Using mobile P2P loading');
-                    await this.setupP2P(url);
+                // ✅ VERIFICAR QUE EL PLAYER EXISTE
+                if (!this.player) {
+                    throw new Error('Player not initialized');
                 }
+
+                this.debugLog('🎯 Setting player.src...', { url });
+
+                // ✅ ASIGNAR URL AL PLAYER
+                this.player.src = url;
+
+                this.debugLog('✅ Player.src assigned successfully');
+
+                this.setState('connecting');
 
                 this.notifyFlutter('video_loading', {
                     url: url,
@@ -628,57 +364,40 @@
                 });
 
             } catch (error) {
-                this.logError('Error loading video:', error);
+                this.debugLog('❌ Error in loadVideo:', error);
                 this.showError('Error al cargar el video: ' + error.message);
+                this.notifyFlutter('error', { message: error.message });
             }
         }
 
         play() {
-            this.player.play().catch(e => {
-                this.logError('Play failed:', e);
+            this.debugLog('▶️ Play called');
+            this.player?.play().catch(e => {
+                this.debugLog('❌ Play failed:', e);
                 this.showError('No se pudo reproducir el video');
             });
         }
 
         pause() {
-            this.player.pause();
+            this.debugLog('⏸️ Pause called');
+            this.player?.pause();
         }
 
         seekTo(time) {
-            this.player.currentTime = time;
-        }
-
-        setVolume(volume) {
-            this.player.volume = Math.max(0, Math.min(1, volume));
-        }
-
-        toggleP2PStats(show) {
-            const statsElement = document.getElementById('p2p-stats');
-            if (show) {
-                statsElement.classList.remove('hidden');
-            } else {
-                statsElement.classList.add('hidden');
+            this.debugLog('⏩ Seek called:', time);
+            if (this.player) {
+                this.player.currentTime = time;
             }
         }
 
-        enableP2P() {
-            if (this.p2pEngine) {
-                this.p2pEngine.setDynamicConfig({ isP2PDisabled: false });
-                this.setState('connecting');
-            }
-        }
+        setState(newState) {
+            if (this.currentState === newState) return;
 
-        disableP2P() {
-            if (this.p2pEngine) {
-                this.p2pEngine.setDynamicConfig({ isP2PDisabled: true });
-                this.setState('disabled');
-            }
-        }
+            this.currentState = newState;
+            this.debugLog('🔄 State changed:', newState);
 
-        // Utility Methods
-        generateSwarmId(url) {
-            if (!url) return 'livevaulthub_default';
-            return 'livevaulthub_' + btoa(url).replace(/[^a-zA-Z0-9]/g, '').substring(0, 20);
+            document.getElementById('p2p-status').textContent = newState;
+            this.notifyFlutter('state_changed', { state: newState });
         }
 
         showLoading() {
@@ -690,6 +409,7 @@
         }
 
         showError(message) {
+            this.debugLog('❌ Showing error:', message);
             document.getElementById('error-message').textContent = message;
             document.getElementById('error').classList.remove('hidden');
             this.hideLoading();
@@ -708,88 +428,87 @@
             };
 
             try {
-                // Para flutter_inappwebview en móvil/desktop
+                // Para móvil/desktop
                 if (window.flutter_inappwebview) {
                     window.flutter_inappwebview.callHandler('FlutterBridge', JSON.stringify(message));
                 }
 
-                // Para web - usar postMessage
+                // Para web
                 if (window.sendToFlutter) {
                     window.sendToFlutter(message);
                 } else if (window.parent && window.parent.postMessage) {
                     window.parent.postMessage(message, '*');
                 }
 
-                this.log('📤 Sent to Flutter:', message);
+                this.debugLog('📤 Sent to Flutter:', { type, data });
             } catch (error) {
-                this.logError('Error sending to Flutter:', error);
+                this.debugLog('❌ Error sending to Flutter:', error);
             }
         }
 
-        // Logging
-        log(...args) {
-            console.log('[LiveVaultHub]', ...args);
-        }
-
-        logError(...args) {
-            console.error('[LiveVaultHub ERROR]', ...args);
-        }
-
-        // Manejar mensajes de Flutter
+        // ✅ MANEJO DE MENSAJES MEJORADO
         handleFlutterMessage(messageData) {
             try {
+                this.debugLog('📥 RAW MESSAGE RECEIVED:', messageData);
+
                 const data = typeof messageData === 'string' ? JSON.parse(messageData) : messageData;
-                this.log('📥 Received from Flutter:', data);
+                this.debugLog('📥 PARSED MESSAGE:', data);
 
                 switch(data.action) {
                     case 'loadVideo':
+                        this.debugLog('🎯 LOAD VIDEO ACTION RECEIVED!', {
+                            url: data.url,
+                            options: data.options
+                        });
                         this.loadVideo(data.url, data.options || {});
                         break;
                     case 'play':
+                        this.debugLog('▶️ PLAY ACTION RECEIVED');
                         this.play();
                         break;
                     case 'pause':
+                        this.debugLog('⏸️ PAUSE ACTION RECEIVED');
                         this.pause();
                         break;
                     case 'seekTo':
+                        this.debugLog('⏩ SEEK ACTION RECEIVED:', data.time);
                         this.seekTo(data.time);
                         break;
-                    case 'setVolume':
-                        this.setVolume(data.volume);
-                        break;
-                    case 'toggleStats':
-                        this.toggleP2PStats(data.show);
-                        break;
-                    case 'enableP2P':
-                        this.enableP2P();
-                        break;
-                    case 'disableP2P':
-                        this.disableP2P();
-                        break;
                     default:
-                        this.log('Unknown action:', data.action);
+                        this.debugLog('❓ Unknown action:', data.action);
                 }
             } catch (error) {
-                this.logError('Error handling Flutter message:', error);
+                this.debugLog('❌ Error handling Flutter message:', error);
             }
         }
     }
 
     // Global functions
     window.retryLoad = function() {
+        window.lvhPlayer?.debugLog('🔄 Retry load called');
         if (window.lvhPlayer && window.lvhPlayer.currentUrl) {
             window.lvhPlayer.loadVideo(window.lvhPlayer.currentUrl);
         }
     };
 
     window.sendMessageToPlayer = function(message) {
+        window.lvhPlayer?.debugLog('📨 sendMessageToPlayer called:', message);
         if (window.lvhPlayer) {
             window.lvhPlayer.handleFlutterMessage(message);
         }
     };
 
+    // ✅ TEST GLOBAL PARA DEBUG
+    window.testLoadVideo = function() {
+        if (window.lvhPlayer) {
+            window.lvhPlayer.debugLog('🧪 Testing loadVideo manually...');
+            window.lvhPlayer.loadVideo('https://fcc3ddae59ed.us-west-2.playback.live-video.net/api/video/v1/us-west-2.893648527354.channel.DmumNckWFTqz.m3u8');
+        }
+    };
+
     // Initialize player
     window.addEventListener('load', () => {
+        console.log('🚀 Window load event - Creating player...');
         window.lvhPlayer = new LiveVaultHubPlayer();
     });
 </script>
