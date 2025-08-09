@@ -1,5 +1,5 @@
 name: netflix_clone
-description: A Netflix clone Flutter application.
+description: LiveVaultHub - Plataforma de streaming P2P white-label para influencers
 publish_to: 'none'
 version: 1.0.0+1
 
@@ -9,13 +9,27 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  video_player: ^2.8.6
+
+  # 🌍 LOCALIZACIÓN INTERNACIONAL
+  flutter_localizations:
+    sdk: flutter
+
+  # 🚀 LIVEVAULTHUB P2P DEPENDENCIES
+  # WebView multiplataforma para P2P Player
+  flutter_inappwebview: ^6.1.5
+
+  # Core dependencies
   http: ^1.1.0
   shared_preferences: ^2.2.2
   provider: ^6.1.1
-  webview_flutter: ^4.4.2
-  webview_flutter_android: ^3.12.1  # 🆕 AÑADIDO para Android
-  webview_flutter_wkwebview: ^3.9.4  # 🆕 AÑADIDO para iOS
+
+  # 🆕 P2P específicas
+  # Para manejo de eventos y streams
+  rxdart: ^0.27.7
+  # Para logging y debugging P2P
+  logger: ^2.0.2+1
+  # Para formateo de datos (MB, tiempo, etc) - Compatible con flutter_localizations
+  intl: ^0.20.2
 
 dev_dependencies:
   flutter_test:
@@ -24,6 +38,7 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
-  # 🆕 AÑADIDO: Assets para WebView Player
+
+  # 🚀 LIVEVAULTHUB P2P ASSETS
   assets:
     - assets/webview/

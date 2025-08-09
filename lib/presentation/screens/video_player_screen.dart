@@ -1,12 +1,19 @@
+import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
-import 'package:webview_flutter/webview_flutter.dart';
+import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import '../../data/models/movie_model.dart';
 import '../../core/providers/content_provider.dart';
 import '../../core/providers/auth_provider.dart';
+import '../../core/services/p2p_service.dart';
+import '../../core/models/p2p_models.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/utils/p2p_utils.dart';
 import '../widgets/custom_button.dart';
+import '../widgets/p2p_stats_widget.dart';
+import '../widgets/p2p_connection_indicator.dart';
 
 class VideoPlayerScreen extends StatefulWidget {
   final MovieModel movie;
@@ -22,8 +29,11 @@ class VideoPlayerScreen extends StatefulWidget {
 
 class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     with TickerProviderStateMixin {
-  // 🚀 WEBVIEW_FLUTTER P2P PLAYER
-  late final WebViewController _webViewController;
+  // 🚀 LIVEVAULTHUB P2P PLAYER - flutter_inappwebview
+  InAppWebViewController? _webViewController;
+  late P2PService _p2pService;
+
+  // Player state
   bool _isPlayerReady = false;
   bool _isPlaying = false;
   bool _isLoading = true;
@@ -31,24 +41,33 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   String? _errorMessage;
   bool _showControls = true;
   bool _showP2PStats = false;
-
-  // Player state
   double _currentTime = 0.0;
   double _duration = 0.0;
-  Map<String, dynamic>? _p2pStats;
+
+  // P2P state
+  P2PStats _p2pStats = P2PStats.empty;
+  P2PState _p2pState = P2PState.initializing;
 
   // UI Controllers
   late AnimationController _controlsAnimationController;
-  late Animation<double> _controlsAnimation;
   late AnimationController _loadingAnimationController;
+  late Animation<double> _controlsAnimation;
   late Animation<double> _loadingAnimation;
+  Timer? _controlsTimer;
+
+  // Streams
+  StreamSubscription<P2PStats>? _statsSubscription;
+  StreamSubscription<P2PState>? _stateSubscription;
+  StreamSubscription<P2PEvent>? _eventSubscription;
+  StreamSubscription<P2PError>? _errorSubscription;
 
   @override
   void initState() {
     super.initState();
+    _p2pService = P2PService.instance;
     _setupAnimations();
     _setupSystemUI();
-    _initializeWebView();
+    _setupP2PListeners();
     _startControlsTimer();
   }
 
@@ -57,6 +76,11 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
       duration: const Duration(milliseconds: 300),
       vsync: this,
     );
+    _loadingAnimationController = AnimationController(
+      duration: const Duration(milliseconds: 1500),
+      vsync: this,
+    )..repeat();
+
     _controlsAnimation = Tween<double>(
       begin: 0.0,
       end: 1.0,
@@ -65,10 +89,6 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
       curve: Curves.easeInOut,
     ));
 
-    _loadingAnimationController = AnimationController(
-      duration: const Duration(milliseconds: 1500),
-      vsync: this,
-    )..repeat();
     _loadingAnimation = Tween<double>(
       begin: 0.0,
       end: 1.0,
@@ -86,438 +106,207 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     ]);
   }
 
-  void _initializeWebView() {
-    try {
-      // 🚀 INICIALIZACIÓN ROBUSTA DE WEBVIEW
-      _webViewController = WebViewController();
-
-      // Configurar WebView paso a paso
-      _configureWebView();
-
-    } catch (e) {
-      print('Error initializing WebView: $e');
-      setState(() {
-        _hasError = true;
-        _errorMessage = 'Error inicializando WebView: $e';
-        _isLoading = false;
-      });
-    }
-  }
-
-  void _configureWebView() async {
-    try {
-      // Paso 1: Configurar JavaScript
-      await _webViewController.setJavaScriptMode(JavaScriptMode.unrestricted);
-
-      // Paso 2: Configurar navegación
-      await _webViewController.setNavigationDelegate(
-        NavigationDelegate(
-          onPageStarted: (String url) {
-            print('🌐 WebView started loading: $url');
-            setState(() {
-              _isLoading = true;
-              _hasError = false;
-            });
-          },
-          onPageFinished: (String url) {
-            print('✅ WebView finished loading: $url');
-            _initializePlayer();
-          },
-          onWebResourceError: (WebResourceError error) {
-            print('❌ WebView error: ${error.description}');
-            setState(() {
-              _hasError = true;
-              _errorMessage = 'Error cargando player: ${error.description}';
-              _isLoading = false;
-            });
-          },
-          onNavigationRequest: (NavigationRequest request) {
-            print('📍 Navigation request: ${request.url}');
-            return NavigationDecision.navigate;
-          },
-        ),
-      );
-
-      // Paso 3: Configurar canal JavaScript
-      await _webViewController.addJavaScriptChannel(
-        'FlutterBridge',
-        onMessageReceived: (JavaScriptMessage message) {
-          print('📨 Message from WebView: ${message.message}');
-          _handlePlayerMessage(message.message);
-        },
-      );
-
-      // Paso 4: Cargar HTML
-      final htmlContent = await _loadPlayerHTML();
-      await _webViewController.loadHtmlString(htmlContent);
-
-    } catch (e) {
-      print('Error configuring WebView: $e');
-      setState(() {
-        _hasError = true;
-        _errorMessage = 'Error configurando WebView: $e';
-        _isLoading = false;
-      });
-    }
-  }
-
-  Future<String> _loadPlayerHTML() async {
-    // HTML Player embebido directamente (sin assets para evitar problemas)
-    return '''
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LiveVaultHub P2P Player</title>
-    
-    <!-- Styles -->
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { 
-            background: #000; 
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            overflow: hidden;
-            height: 100vh;
-            width: 100vw;
-        }
-        #player-container {
-            width: 100vw;
-            height: 100vh;
-            position: relative;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-        video {
-            width: 100%;
-            height: 100%;
-            object-fit: contain;
-        }
-        .loading {
-            color: white;
-            text-align: center;
-            font-size: 18px;
-        }
-        .error {
-            color: #ff6b6b;
-            text-align: center;
-            font-size: 16px;
-        }
-    </style>
-</head>
-<body>
-    <div id="player-container">
-        <div class="loading" id="loading">
-            <h2>🚀 Iniciando LiveVaultHub Player...</h2>
-            <p>Conectando red P2P...</p>
-        </div>
-        
-        <video 
-            id="video-player" 
-            controls 
-            playsinline 
-            webkit-playsinline
-            style="display: none;"
-        >
-            Tu navegador no soporta video HTML5.
-        </video>
-        
-        <div class="error" id="error" style="display: none;">
-            <h2>❌ Error de Reproducción</h2>
-            <p id="error-message">No se pudo cargar el video</p>
-        </div>
-    </div>
-
-    <script>
-        class LiveVaultHubPlayer {
-            constructor() {
-                this.player = document.getElementById('video-player');
-                this.loading = document.getElementById('loading');
-                this.error = document.getElementById('error');
-                this.currentUrl = null;
-                
-                console.log('🎬 LiveVaultHub Player initialized');
-                this.setupEventListeners();
-                this.notifyFlutter('player_ready');
-            }
-            
-            setupEventListeners() {
-                this.player.addEventListener('loadstart', () => {
-                    this.notifyFlutter('loadstart');
-                });
-                
-                this.player.addEventListener('loadedmetadata', () => {
-                    this.hideLoading();
-                    this.notifyFlutter('loadedmetadata', {
-                        duration: this.player.duration,
-                        videoWidth: this.player.videoWidth,
-                        videoHeight: this.player.videoHeight
-                    });
-                });
-                
-                this.player.addEventListener('canplay', () => {
-                    this.notifyFlutter('canplay');
-                });
-                
-                this.player.addEventListener('play', () => {
-                    this.notifyFlutter('play');
-                });
-                
-                this.player.addEventListener('pause', () => {
-                    this.notifyFlutter('pause');
-                });
-                
-                this.player.addEventListener('timeupdate', () => {
-                    this.notifyFlutter('timeupdate', {
-                        currentTime: this.player.currentTime,
-                        duration: this.player.duration
-                    });
-                });
-                
-                this.player.addEventListener('ended', () => {
-                    this.notifyFlutter('ended');
-                });
-                
-                this.player.addEventListener('error', (e) => {
-                    console.error('Player error:', e);
-                    this.showError('Error de reproducción del video');
-                });
-            }
-            
-            loadVideo(url, options = {}) {
-                console.log('🎥 Loading video:', url);
-                this.currentUrl = url;
-                
-                this.showLoading();
-                this.hideError();
-                
-                this.player.src = url;
-                this.player.style.display = 'block';
-                
-                // Simular estadísticas P2P
-                this.simulateP2PStats();
-                
-                this.notifyFlutter('video_loading', { url: url });
-            }
-            
-            play() {
-                this.player.play().catch(e => {
-                    console.error('Play failed:', e);
-                    this.showError('No se pudo reproducir el video');
-                });
-            }
-            
-            pause() {
-                this.player.pause();
-            }
-            
-            seekTo(time) {
-                this.player.currentTime = time;
-            }
-            
-            simulateP2PStats() {
-                // Simular estadísticas P2P cada 3 segundos
-                setInterval(() => {
-                    const stats = {
-                        peers: Math.floor(Math.random() * 20) + 10,
-                        downloaded: Math.floor(Math.random() * 1000000),
-                        uploaded: Math.floor(Math.random() * 500000),
-                        p2pRatio: Math.floor(Math.random() * 30) + 60
-                    };
-                    
-                    this.notifyFlutter('p2p_stats', { stats: stats });
-                }, 3000);
-            }
-            
-            showLoading() {
-                this.loading.style.display = 'block';
-                this.player.style.display = 'none';
-                this.error.style.display = 'none';
-            }
-            
-            hideLoading() {
-                this.loading.style.display = 'none';
-                this.player.style.display = 'block';
-            }
-            
-            showError(message) {
-                document.getElementById('error-message').textContent = message;
-                this.error.style.display = 'block';
-                this.loading.style.display = 'none';
-                this.player.style.display = 'none';
-                
-                this.notifyFlutter('error', { message: message });
-            }
-            
-            hideError() {
-                this.error.style.display = 'none';
-            }
-            
-            notifyFlutter(type, data = {}) {
-                const message = {
-                    type: type,
-                    ...data,
-                    timestamp: Date.now()
-                };
-                
-                try {
-                    // Enviar a Flutter via JavaScriptChannel
-                    if (window.FlutterBridge && window.FlutterBridge.postMessage) {
-                        window.FlutterBridge.postMessage(JSON.stringify(message));
-                    }
-                    
-                    console.log('📤 Sent to Flutter:', message);
-                } catch (error) {
-                    console.error('❌ Error sending to Flutter:', error);
-                }
-            }
-            
-            // Manejar mensajes de Flutter
-            handleFlutterMessage(messageData) {
-                try {
-                    const data = typeof messageData === 'string' ? JSON.parse(messageData) : messageData;
-                    console.log('📥 Received from Flutter:', data);
-                    
-                    switch(data.action) {
-                        case 'loadVideo':
-                            this.loadVideo(data.url, data.options || {});
-                            break;
-                        case 'play':
-                            this.play();
-                            break;
-                        case 'pause':
-                            this.pause();
-                            break;
-                        case 'seekTo':
-                            this.seekTo(data.time);
-                            break;
-                        default:
-                            console.log('Unknown action:', data.action);
-                    }
-                } catch (error) {
-                    console.error('Error handling Flutter message:', error);
-                }
-            }
-        }
-        
-        // Función global para Flutter
-        function sendMessageToPlayer(message) {
-            if (window.lvhPlayer) {
-                window.lvhPlayer.handleFlutterMessage(message);
-            }
-        }
-        
-        // Inicializar cuando DOM esté listo
-        document.addEventListener('DOMContentLoaded', () => {
-            window.lvhPlayer = new LiveVaultHubPlayer();
+  void _setupP2PListeners() {
+    // Estadísticas P2P
+    _statsSubscription = _p2pService.stats.listen((stats) {
+      if (mounted) {
+        setState(() {
+          _p2pStats = stats;
         });
-        
-        // Fallback si ya está cargado
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', () => {
-                if (!window.lvhPlayer) {
-                    window.lvhPlayer = new LiveVaultHubPlayer();
-                }
-            });
-        } else if (!window.lvhPlayer) {
-            window.lvhPlayer = new LiveVaultHubPlayer();
-        }
-    </script>
-</body>
-</html>
-    ''';
-  }
-
-  void _initializePlayer() {
-    final script = '''
-      if (window.lvhPlayer) {
-        window.lvhPlayer.loadVideo('${widget.movie.videoUrl}', {
-          isLive: ${widget.movie.duration == 0},
-          startTime: ${widget.movie.watchProgress ?? 0}
-        });
-      } else {
-        console.log('❌ Player not ready yet');
       }
-    ''';
+    });
 
-    _webViewController.runJavaScript(script);
-  }
+    // Estado P2P
+    _stateSubscription = _p2pService.state.listen((state) {
+      if (mounted) {
+        setState(() {
+          _p2pState = state;
+        });
+      }
+    });
 
-  void _handlePlayerMessage(String message) {
-    try {
-      print('📨 Received message: $message');
+    // Eventos P2P
+    _eventSubscription = _p2pService.events.listen((event) {
+      _handleP2PEvent(event);
+    });
 
-      // Parsing simple para evitar errores complejos
-      String type = 'unknown';
-      Map<String, dynamic> data = {};
+    // Errores P2P
+    _errorSubscription = _p2pService.errors.listen((error) {
+      _handleP2PError(error);
+    });
 
-      if (message.contains('player_ready')) type = 'player_ready';
-      else if (message.contains('play')) type = 'play';
-      else if (message.contains('pause')) type = 'pause';
-      else if (message.contains('loadedmetadata')) type = 'loadedmetadata';
-      else if (message.contains('error')) type = 'error';
-
-      print('📨 Handling message type: $type');
-
-      switch (type) {
-        case 'player_ready':
+    // En web, timeout para forzar carga si no llega player_ready
+    if (kIsWeb) {
+      Timer(const Duration(seconds: 8), () {
+        if (mounted && !_isPlayerReady && _isLoading) {
+          P2PUtils.logP2PEvent('Web timeout - forcing video load');
           setState(() {
             _isPlayerReady = true;
           });
-          break;
-
-        case 'loadedmetadata':
-          setState(() {
-            _isLoading = false;
-            _duration = 3600.0; // Duración simulada
-          });
-          break;
-
-        case 'play':
-          setState(() {
-            _isPlaying = true;
-          });
-          break;
-
-        case 'pause':
-          setState(() {
-            _isPlaying = false;
-          });
-          break;
-
-        case 'error':
-          setState(() {
-            _hasError = true;
-            _errorMessage = 'Error de reproducción';
-            _isLoading = false;
-          });
-          break;
-      }
-    } catch (e) {
-      print('❌ Error processing player message: $e');
+          _loadVideo();
+        }
+      });
     }
   }
 
-  void _sendMessageToPlayer(String action, [Map<String, dynamic>? data]) {
-    final message = {
-      'action': action,
-      if (data != null) ...data,
-    };
+  void _handleP2PEvent(P2PEvent event) {
+    if (!mounted) return;
 
-    final script = '''
-      sendMessageToPlayer(${message.toString().replaceAll("'", '"')});
-    ''';
+    P2PUtils.logP2PDebug('Handling P2P event', {'type': event.type.name, 'data': event.data});
 
-    _webViewController.runJavaScript(script).catchError((e) {
-      print('❌ Error sending message to player: $e');
+    switch (event.type) {
+      case P2PEventType.playerReady:
+        setState(() {
+          _isPlayerReady = true;
+        });
+        _loadVideo();
+        break;
+
+      case P2PEventType.metadataLoaded:
+        setState(() {
+          _isLoading = false;
+          _duration = event.data['duration']?.toDouble() ?? 0.0;
+        });
+        break;
+
+      case P2PEventType.play:
+        setState(() {
+          _isPlaying = true;
+        });
+        break;
+
+      case P2PEventType.pause:
+        setState(() {
+          _isPlaying = false;
+        });
+        break;
+
+      case P2PEventType.timeUpdate:
+        final currentTime = event.data['currentTime']?.toDouble() ?? 0.0;
+        setState(() {
+          _currentTime = currentTime;
+        });
+        _updateWatchProgress(currentTime);
+        break;
+
+      case P2PEventType.ended:
+        setState(() {
+          _isPlaying = false;
+        });
+        _handleVideoEnded();
+        break;
+
+      case P2PEventType.error:
+        _handlePlayerError(event.data['message'] ?? 'Error desconocido');
+        break;
+
+      case P2PEventType.peerConnect:
+        _showP2PNotification('Peer conectado: ${event.data['peerId']}');
+        break;
+
+      default:
+        break;
+    }
+  }
+
+  void _handleP2PError(P2PError error) {
+    P2PUtils.logP2PError('P2P Error in player', error);
+
+    if (error.code == 'CONNECTION_FAILED') {
+      _showP2PNotification('P2P: Usando CDN como respaldo', isError: true);
+    }
+  }
+
+  void _showP2PNotification(String message, {bool isError = false}) {
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: isError ? Colors.orange : AppTheme.primaryPurple,
+        duration: const Duration(seconds: 2),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(8),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _loadVideo() async {
+    if (_webViewController == null) {
+      P2PUtils.logP2PError('WebView controller not available');
+      return;
+    }
+
+    try {
+      P2PUtils.logP2PEvent('Loading video', {
+        'movieId': widget.movie.id,
+        'url': widget.movie.videoUrl,
+        'isLive': widget.movie.duration == 0,
+        'platform': kIsWeb ? 'web' : 'native',
+        'playerReady': _isPlayerReady,
+      });
+
+      final config = P2PUtils.createOptimalConfig(
+        widget.movie.id,
+        isLive: widget.movie.duration == 0,
+        enableDebug: true,
+      );
+
+      await _p2pService.loadVideo(widget.movie.videoUrl, config: config);
+
+    } catch (e) {
+      P2PUtils.logP2PError('Failed to load video', e);
+      _handlePlayerError('Error al cargar el video: $e');
+    }
+  }
+
+  void _handlePlayerError(String message) {
+    setState(() {
+      _hasError = true;
+      _errorMessage = message;
+      _isLoading = false;
     });
+  }
+
+  void _handleVideoEnded() {
+    final contentProvider = Provider.of<ContentProvider>(context, listen: false);
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+
+    // Marcar como completado
+    contentProvider.updateWatchProgress(
+      widget.movie.id,
+      widget.movie.duration * 60, // Convertir a segundos
+      authProvider,
+    );
+  }
+
+  void _updateWatchProgress(double currentTime) {
+    if (currentTime.toInt() % 30 == 0) { // Cada 30 segundos
+      final contentProvider = Provider.of<ContentProvider>(context, listen: false);
+      final authProvider = Provider.of<AuthProvider>(context, listen: false);
+
+      contentProvider.updateWatchProgress(
+        widget.movie.id,
+        currentTime.toInt(),
+        authProvider,
+      );
+    }
   }
 
   @override
   void dispose() {
     _controlsAnimationController.dispose();
     _loadingAnimationController.dispose();
+    _controlsTimer?.cancel();
+
+    // Cancelar suscripciones P2P
+    _statsSubscription?.cancel();
+    _stateSubscription?.cancel();
+    _eventSubscription?.cancel();
+    _errorSubscription?.cancel();
+
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
     super.dispose();
@@ -532,10 +321,10 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
           // 🎬 WebView Player
           _buildWebViewPlayer(),
 
-          // 🎮 Native Flutter Controls Overlay
+          // 🎮 Controls Overlay
           if (_showControls) _buildControlsOverlay(),
 
-          // 📊 P2P Stats Overlay
+          // 📊 P2P Stats
           if (_showP2PStats) _buildP2PStatsOverlay(),
 
           // ⏳ Loading Overlay
@@ -546,6 +335,9 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
 
           // 🔙 Back Button
           _buildBackButton(),
+
+          // 📡 P2P Status Indicator
+          _buildP2PStatusIndicator(),
         ],
       ),
     );
@@ -554,8 +346,55 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   Widget _buildWebViewPlayer() {
     return GestureDetector(
       onTap: _onScreenTap,
-      child: WebViewWidget(
-        controller: _webViewController,
+      child: InAppWebView(
+        onWebViewCreated: (controller) async {
+          _webViewController = controller;
+          try {
+            await _p2pService.initialize(controller);
+          } catch (e) {
+            P2PUtils.logP2PError('Failed to initialize P2P service', e);
+            // En web, continuar sin P2P si falla la inicialización
+            if (kIsWeb) {
+              setState(() {
+                _isPlayerReady = true;
+              });
+              _loadVideo();
+            } else {
+              _handlePlayerError('Error inicializando P2P: $e');
+            }
+          }
+        },
+        onLoadStart: (controller, url) {
+          P2PUtils.logP2PDebug('WebView loading started', {'url': url.toString()});
+        },
+        onLoadStop: (controller, url) async {
+          P2PUtils.logP2PDebug('WebView loading finished', {'url': url.toString()});
+        },
+        onConsoleMessage: (controller, consoleMessage) {
+          P2PUtils.logP2PDebug('WebView Console: ${consoleMessage.message}');
+        },
+        onLoadError: (controller, url, code, message) {
+          P2PUtils.logP2PError('WebView error', {'code': code, 'message': message});
+
+          // En web, algunos errores son esperados, ser más permisivo
+          if (kIsWeb && (code == -1 || message.contains('net::ERR_FILE_NOT_FOUND'))) {
+            P2PUtils.logP2PDebug('Web WebView error ignored: $message');
+            return;
+          }
+
+          _handlePlayerError('Error cargando player: $message');
+        },
+        initialSettings: InAppWebViewSettings(
+          javaScriptEnabled: true,
+          allowsInlineMediaPlayback: true,
+          mediaPlaybackRequiresUserGesture: false,
+          allowUniversalAccessFromFileURLs: true,
+          allowFileAccessFromFileURLs: true,
+          isInspectable: true, // Para debugging
+          clearCache: false,
+          cacheEnabled: true,
+        ),
+        initialFile: "assets/webview/player.html",
       ),
     );
   }
@@ -578,40 +417,12 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
         ),
         child: Column(
           children: [
-            // Top Controls
             _buildTopControls(),
-
-            // Center Play Button
             Expanded(
               child: Center(
-                child: GestureDetector(
-                  onTap: _togglePlayPause,
-                  child: Container(
-                    decoration: BoxDecoration(
-                      gradient: AppTheme.primaryGradient.scale(0.9),
-                      shape: BoxShape.circle,
-                      boxShadow: [
-                        BoxShadow(
-                          color: AppTheme.primaryPurple.withOpacity(0.5),
-                          blurRadius: 20,
-                          spreadRadius: 5,
-                        ),
-                      ],
-                    ),
-                    child: IconButton(
-                      iconSize: 64,
-                      icon: Icon(
-                        _isPlaying ? Icons.pause : Icons.play_arrow,
-                        color: Colors.white,
-                      ),
-                      onPressed: _togglePlayPause,
-                    ),
-                  ),
-                ),
+                child: _buildCenterPlayButton(),
               ),
             ),
-
-            // Bottom Controls
             _buildBottomControls(),
           ],
         ),
@@ -625,7 +436,6 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
         padding: const EdgeInsets.all(16),
         child: Row(
           children: [
-            // Movie Title
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -664,27 +474,47 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
                 ],
               ),
             ),
-
-            // P2P Stats Toggle
-            IconButton(
-              icon: Icon(
-                _showP2PStats ? Icons.analytics : Icons.analytics_outlined,
-                color: _showP2PStats ? AppTheme.primaryViolet : Colors.white,
-              ),
-              onPressed: () {
+            P2PToolbarIndicator(
+              state: _p2pState,
+              peers: _p2pStats.peers,
+              onTap: () {
                 setState(() {
                   _showP2PStats = !_showP2PStats;
                 });
-                _sendMessageToPlayer('toggleP2PStats', {'show': _showP2PStats});
               },
             ),
-
-            // More Options
+            const SizedBox(width: 12),
             IconButton(
               icon: const Icon(Icons.more_vert, color: Colors.white),
               onPressed: _showMoreOptions,
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCenterPlayButton() {
+    return GestureDetector(
+      onTap: _togglePlayPause,
+      child: Container(
+        width: 80,
+        height: 80,
+        decoration: BoxDecoration(
+          gradient: AppTheme.primaryGradient.scale(0.9),
+          shape: BoxShape.circle,
+          boxShadow: [
+            BoxShadow(
+              color: AppTheme.primaryPurple.withOpacity(0.5),
+              blurRadius: 20,
+              spreadRadius: 5,
+            ),
+          ],
+        ),
+        child: Icon(
+          _isPlaying ? Icons.pause : Icons.play_arrow,
+          color: Colors.white,
+          size: 40,
         ),
       ),
     );
@@ -701,11 +531,8 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
               Row(
                 children: [
                   Text(
-                    _formatDuration(_currentTime),
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 12,
-                    ),
+                    P2PUtils.formatDuration(_currentTime),
+                    style: const TextStyle(color: Colors.white, fontSize: 12),
                   ),
                   Expanded(
                     child: Slider(
@@ -719,63 +546,40 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
                     ),
                   ),
                   Text(
-                    _formatDuration(_duration),
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 12,
-                    ),
+                    P2PUtils.formatDuration(_duration),
+                    style: const TextStyle(color: Colors.white, fontSize: 12),
                   ),
                 ],
               ),
               const SizedBox(height: 8),
             ],
-
             // Control Buttons
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: [
-                // My List
                 _buildControlButton(
-                  icon: widget.movie.isInMyList
-                      ? Icons.check
-                      : Icons.add,
+                  icon: widget.movie.isInMyList ? Icons.check : Icons.add,
                   label: 'Mi Lista',
                   onPressed: _toggleMyList,
                 ),
-
-                // Download (placeholder)
-                _buildControlButton(
-                  icon: Icons.download,
-                  label: 'Descargar',
-                  onPressed: () {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: const Text('Descarga disponible próximamente'),
-                        backgroundColor: AppTheme.primaryPurple,
-                      ),
-                    );
-                  },
-                ),
-
-                // Share
                 _buildControlButton(
                   icon: Icons.share,
                   label: 'Compartir',
                   onPressed: _shareStream,
                 ),
-
-                // Quality (placeholder)
                 _buildControlButton(
-                  icon: Icons.hd,
-                  label: 'Calidad',
+                  icon: Icons.analytics,
+                  label: 'Estadísticas',
                   onPressed: () {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: const Text('Calidad automática P2P optimizada'),
-                        backgroundColor: AppTheme.primaryPurple,
-                      ),
-                    );
+                    setState(() {
+                      _showP2PStats = !_showP2PStats;
+                    });
                   },
+                ),
+                _buildControlButton(
+                  icon: Icons.settings,
+                  label: 'Calidad',
+                  onPressed: _showQualitySettings,
                 ),
               ],
             ),
@@ -798,10 +602,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
         ),
         Text(
           label,
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 10,
-          ),
+          style: const TextStyle(color: Colors.white, fontSize: 10),
         ),
       ],
     );
@@ -811,77 +612,22 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     return Positioned(
       top: 100,
       right: 16,
-      child: Container(
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          gradient: AppTheme.primaryGradient.scale(0.9),
-          borderRadius: BorderRadius.circular(12),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.5),
-              blurRadius: 10,
-            ),
-          ],
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Row(
-              children: [
-                Icon(Icons.analytics, color: Colors.white, size: 16),
-                SizedBox(width: 8),
-                Text(
-                  'P2P Stats',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 12,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            _buildStatRow('Status', 'Connecting...'),
-            _buildStatRow('Peers', '0'),
-            _buildStatRow('P2P Ratio', '0%'),
-            _buildStatRow('Downloaded', '0 MB'),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildStatRow(String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 2),
-      child: Row(
-        children: [
-          SizedBox(
-            width: 80,
-            child: Text(
-              '$label:',
-              style: const TextStyle(
-                color: Colors.white70,
-                fontSize: 10,
-              ),
-            ),
-          ),
-          Text(
-            value,
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 10,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-        ],
+      child: P2PStatsWidget(
+        stats: _p2pStats,
+        state: _p2pState,
+        isExpanded: true,
+        onClose: () {
+          setState(() {
+            _showP2PStats = false;
+          });
+        },
       ),
     );
   }
 
   Widget _buildLoadingOverlay() {
     return Container(
-      color: Colors.black.withOpacity(0.8),
+      color: Colors.black.withOpacity(0.9),
       child: Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -909,7 +655,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
             ),
             const SizedBox(height: 24),
             const Text(
-              'Iniciando P2P Player...',
+              'Iniciando LiveVaultHub Player...',
               style: TextStyle(
                 color: Colors.white,
                 fontSize: 18,
@@ -918,7 +664,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
             ),
             const SizedBox(height: 8),
             Text(
-              'Conectando a la red descentralizada',
+              _p2pState.description,
               style: TextStyle(
                 color: AppTheme.textGrey,
                 fontSize: 14,
@@ -948,11 +694,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(
-                Icons.error_outline,
-                color: Colors.redAccent,
-                size: 48,
-              ),
+              const Icon(Icons.error_outline, color: Colors.redAccent, size: 48),
               const SizedBox(height: 16),
               const Text(
                 'Error de Reproducción',
@@ -965,10 +707,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
               const SizedBox(height: 8),
               Text(
                 _errorMessage ?? 'Error desconocido',
-                style: TextStyle(
-                  color: AppTheme.textGrey,
-                  fontSize: 14,
-                ),
+                style: TextStyle(color: AppTheme.textGrey, fontSize: 14),
                 textAlign: TextAlign.center,
               ),
               const SizedBox(height: 24),
@@ -980,24 +719,14 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
                       style: OutlinedButton.styleFrom(
                         side: BorderSide(color: AppTheme.textGrey),
                       ),
-                      child: Text(
-                        'Volver',
-                        style: TextStyle(color: AppTheme.textGrey),
-                      ),
+                      child: Text('Volver', style: TextStyle(color: AppTheme.textGrey)),
                     ),
                   ),
                   const SizedBox(width: 16),
                   Expanded(
                     child: CustomButton(
                       text: 'Reintentar',
-                      onPressed: () {
-                        setState(() {
-                          _hasError = false;
-                          _errorMessage = null;
-                          _isLoading = true;
-                        });
-                        _initializePlayer();
-                      },
+                      onPressed: _retryLoad,
                     ),
                   ),
                 ],
@@ -1028,18 +757,40 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     );
   }
 
+  Widget _buildP2PStatusIndicator() {
+    return Positioned(
+      top: 80,
+      left: 16,
+      child: SafeArea(
+        child: P2PConnectionIndicator(
+          state: _p2pState,
+          peers: _p2pStats.peers,
+          compact: true,
+          onTap: () {
+            setState(() {
+              _showP2PStats = !_showP2PStats;
+            });
+          },
+        ),
+      ),
+    );
+  }
+
   // Control Methods
   void _togglePlayPause() {
     if (_isPlaying) {
-      _sendMessageToPlayer('pause');
+      _p2pService.pause();
     } else {
-      _sendMessageToPlayer('play');
+      _p2pService.play();
     }
     _resetControlsTimer();
   }
 
   void _seekTo(double time) {
-    _sendMessageToPlayer('seekTo', {'time': time});
+    _p2pService.seekTo(time);
+    setState(() {
+      _currentTime = time;
+    });
   }
 
   void _toggleMyList() async {
@@ -1056,12 +807,9 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            widget.movie.isInMyList
-                ? 'Eliminado de Mi Lista'
-                : 'Agregado a Mi Lista',
+            widget.movie.isInMyList ? 'Eliminado de Mi Lista' : 'Agregado a Mi Lista',
           ),
           backgroundColor: AppTheme.primaryPurple,
-          duration: const Duration(seconds: 2),
         ),
       );
     }
@@ -1070,7 +818,16 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   void _shareStream() {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: const Text('Compartir stream - Próximamente'),
+        content: const Text('Función de compartir próximamente'),
+        backgroundColor: AppTheme.primaryPurple,
+      ),
+    );
+  }
+
+  void _showQualitySettings() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: const Text('Calidad automática P2P optimizada'),
         backgroundColor: AppTheme.primaryPurple,
       ),
     );
@@ -1083,46 +840,61 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      builder: (context) {
-        return Container(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 40,
-                height: 4,
-                margin: const EdgeInsets.only(bottom: 20),
-                decoration: BoxDecoration(
-                  gradient: AppTheme.primaryGradient,
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-              ListTile(
-                leading: const Icon(Icons.info_outline, color: Colors.white),
-                title: const Text('Información del Stream', style: TextStyle(color: Colors.white)),
-                onTap: () {
-                  Navigator.pop(context);
-                  _showStreamInfo();
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.flag_outlined, color: Colors.white),
-                title: const Text('Reportar Problema', style: TextStyle(color: Colors.white)),
-                onTap: () {
-                  Navigator.pop(context);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: const Text('Reporte enviado'),
-                      backgroundColor: AppTheme.primaryPurple,
-                    ),
-                  );
-                },
-              ),
-            ],
+      builder: (context) => _buildMoreOptionsSheet(),
+    );
+  }
+
+  Widget _buildMoreOptionsSheet() {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 40,
+            height: 4,
+            decoration: BoxDecoration(
+              gradient: AppTheme.primaryGradient,
+              borderRadius: BorderRadius.circular(2),
+            ),
           ),
-        );
-      },
+          const SizedBox(height: 20),
+          ListTile(
+            leading: const Icon(Icons.info_outline, color: Colors.white),
+            title: const Text('Información del Stream', style: TextStyle(color: Colors.white)),
+            onTap: () {
+              Navigator.pop(context);
+              _showStreamInfo();
+            },
+          ),
+          ListTile(
+            leading: Icon(
+              _p2pState == P2PState.disabled ? Icons.wifi : Icons.wifi_off,
+              color: Colors.white,
+            ),
+            title: Text(
+              _p2pState == P2PState.disabled ? 'Habilitar P2P' : 'Deshabilitar P2P',
+              style: const TextStyle(color: Colors.white),
+            ),
+            onTap: () {
+              Navigator.pop(context);
+              if (_p2pState == P2PState.disabled) {
+                _p2pService.enableP2P();
+              } else {
+                _p2pService.disableP2P();
+              }
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.bug_report, color: Colors.white),
+            title: const Text('Diagnóstico P2P', style: TextStyle(color: Colors.white)),
+            onTap: () {
+              Navigator.pop(context);
+              _showP2PDiagnostic();
+            },
+          ),
+        ],
+      ),
     );
   }
 
@@ -1133,34 +905,51 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
         backgroundColor: AppTheme.darkGrey,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(16),
-          side: BorderSide(
-            color: AppTheme.primaryViolet.withOpacity(0.3),
-            width: 1,
-          ),
         ),
-        title: Text(
-          widget.movie.title,
-          style: const TextStyle(color: Colors.white),
-        ),
+        title: Text(widget.movie.title, style: const TextStyle(color: Colors.white)),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _buildInfoRow('Tipo', widget.movie.duration == 0 ? 'Live Stream' : 'Video On Demand'),
-            _buildInfoRow('Género', widget.movie.genre),
-            _buildInfoRow('Rating', '${widget.movie.rating}/10'),
-            if (widget.movie.duration > 0)
-              _buildInfoRow('Duración', widget.movie.formattedDuration),
-            _buildInfoRow('Tecnología', 'P2P + CDN Híbrido'),
+            _buildInfoRow('Tipo', widget.movie.duration == 0 ? 'Live Stream' : 'VOD'),
+            _buildInfoRow('Estado P2P', _p2pState.description),
+            _buildInfoRow('Peers', _p2pStats.peers.toString()),
+            _buildInfoRow('Ratio P2P', _p2pStats.p2pRatioFormatted),
+            _buildInfoRow('Descargado', _p2pStats.downloadedMB),
           ],
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: Text(
-              'Cerrar',
-              style: TextStyle(color: AppTheme.primaryViolet),
+            child: Text('Cerrar', style: TextStyle(color: AppTheme.primaryViolet)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showP2PDiagnostic() {
+    final diagnostic = _p2pService.getDiagnosticInfo();
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: AppTheme.darkGrey,
+        title: const Text('Diagnóstico P2P', style: TextStyle(color: Colors.white)),
+        content: SingleChildScrollView(
+          child: Text(
+            diagnostic.toString(),
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 12,
+              fontFamily: 'monospace',
             ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Cerrar', style: TextStyle(color: AppTheme.primaryViolet)),
           ),
         ],
       ),
@@ -1173,22 +962,16 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
       child: Row(
         children: [
           SizedBox(
-            width: 120,
+            width: 100,
             child: Text(
               '$label:',
-              style: TextStyle(
-                color: AppTheme.textGrey,
-                fontSize: 14,
-              ),
+              style: TextStyle(color: AppTheme.textGrey, fontSize: 14),
             ),
           ),
           Expanded(
             child: Text(
               value,
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 14,
-              ),
+              style: const TextStyle(color: Colors.white, fontSize: 14),
             ),
           ),
         ],
@@ -1196,29 +979,13 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     );
   }
 
-  // Utility Methods
-  String _formatDuration(double seconds) {
-    final duration = Duration(seconds: seconds.toInt());
-    String twoDigits(int n) => n.toString().padLeft(2, "0");
-
-    if (duration.inHours > 0) {
-      return "${duration.inHours}:${twoDigits(duration.inMinutes.remainder(60))}:${twoDigits(duration.inSeconds.remainder(60))}";
-    } else {
-      return "${duration.inMinutes}:${twoDigits(duration.inSeconds.remainder(60))}";
-    }
-  }
-
-  void _updateWatchProgress() {
-    if (_currentTime > 0 && _currentTime.toInt() % 30 == 0) {
-      final contentProvider = Provider.of<ContentProvider>(context, listen: false);
-      final authProvider = Provider.of<AuthProvider>(context, listen: false);
-
-      contentProvider.updateWatchProgress(
-        widget.movie.id,
-        _currentTime.toInt(),
-        authProvider,
-      );
-    }
+  void _retryLoad() {
+    setState(() {
+      _hasError = false;
+      _errorMessage = null;
+      _isLoading = true;
+    });
+    _loadVideo();
   }
 
   void _startControlsTimer() {
@@ -1226,8 +993,9 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   }
 
   void _resetControlsTimer() {
-    Future.delayed(const Duration(seconds: 3), () {
-      if (mounted && _showControls) {
+    _controlsTimer?.cancel();
+    _controlsTimer = Timer(const Duration(seconds: 3), () {
+      if (mounted && _showControls && _isPlaying) {
         setState(() {
           _showControls = false;
         });
@@ -1250,7 +1018,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   }
 }
 
-// Extension para gradients
+// Extension para gradientes
 extension GradientExtension on LinearGradient {
   LinearGradient scale(double opacity) {
     return LinearGradient(
