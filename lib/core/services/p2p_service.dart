@@ -1,4 +1,4 @@
-// lib/core/services/p2p_service.dart - COMUNICACIÓN WEB COMPLETAMENTE CORREGIDA
+// lib/core/services/p2p_service.dart - COMUNICACIÓN COMPLETAMENTE CORREGIDA
 
 import 'dart:async';
 import 'dart:convert';
@@ -30,7 +30,10 @@ class P2PService extends ChangeNotifier {
   Timer? _webPollingTimer;
 
   /// Queue de mensajes para web
-  final List<String> _pendingMessages = [];
+  final List<Map<String, dynamic>> _pendingMessages = [];
+
+  /// Último mensaje enviado para debugging
+  String? _lastSentMessage;
 
   /// Constructor
   P2PService() {
@@ -75,15 +78,15 @@ class P2PService extends ChangeNotifier {
     P2PUtils.logP2PEvent('Service initialized', {'platform': kIsWeb ? 'web' : 'native'});
   }
 
-  /// ✅ NUEVA COMUNICACIÓN WEB VIA DOM EVENTS
+  /// ✅ NUEVA COMUNICACIÓN WEB VIA DOM EVENTS + POSTMESSAGE
   Future<void> _setupWebCommunication() async {
     try {
-      P2PUtils.logP2PEvent('Setting up web communication via DOM events');
+      P2PUtils.logP2PEvent('Setting up web communication via DOM events + postMessage');
 
-      // Setup DOM-based communication
+      // Setup DOM-based communication + postMessage
       await _webViewController!.evaluateJavascript(source: '''
-        // ✅ NUEVO SISTEMA DE COMUNICACIÓN VIA DOM
-        console.log('🔧 Setting up DOM-based communication...');
+        // ✅ DUAL COMMUNICATION SYSTEM
+        console.log('🔧 Setting up DUAL communication system...');
         
         // Queue para mensajes de Flutter
         window.flutterMessageQueue = [];
@@ -91,34 +94,50 @@ class P2PService extends ChangeNotifier {
         // Queue para mensajes hacia Flutter  
         window.toFlutterQueue = [];
         
+        // ✅ POSTMESSAGE LISTENER
+        window.addEventListener('message', function(event) {
+          console.log('📨 PostMessage received:', event.data);
+          
+          if (event.data && event.data.action && window.lvhState && window.lvhState.playerInstance) {
+            window.lvhState.playerInstance.handleFlutterMessage(event.data);
+          } else {
+            console.log('⚠️ Player not ready, queuing postMessage');
+            window.flutterMessageQueue.push(event.data);
+          }
+        });
+        
         // ✅ LISTENER PARA EVENTOS DOM PERSONALIZADOS
         document.addEventListener('flutter-message', function(event) {
           console.log('📨 DOM Event received:', event.detail);
           
-          if (window.lvhPlayer && window.lvhPlayer.handleFlutterMessage) {
-            window.lvhPlayer.handleFlutterMessage(event.detail);
+          if (window.lvhState && window.lvhState.playerInstance) {
+            window.lvhState.playerInstance.handleFlutterMessage(event.detail);
           } else {
-            console.log('⚠️ Player not ready, queuing message');
+            console.log('⚠️ Player not ready, queuing DOM message');
             window.flutterMessageQueue.push(event.detail);
           }
         });
         
         // ✅ FUNCIÓN PARA QUE EL PLAYER ENVÍE MENSAJES
         window.sendToFlutter = function(data) {
-          console.log('📤 Sending to Flutter via DOM:', data);
+          console.log('📤 Sending to Flutter via queue:', data);
           window.toFlutterQueue.push(JSON.stringify(data));
         };
         
         // ✅ FUNCIÓN PARA PROCESAR MENSAJES PENDIENTES
         window.processQueuedMessages = function() {
-          if (window.lvhPlayer && window.flutterMessageQueue.length > 0) {
+          if (window.lvhState && window.lvhState.playerInstance && window.flutterMessageQueue.length > 0) {
             console.log('🔄 Processing', window.flutterMessageQueue.length, 'queued messages');
             const messages = window.flutterMessageQueue.splice(0);
-            messages.forEach(msg => window.lvhPlayer.handleFlutterMessage(msg));
+            messages.forEach(msg => {
+              if (window.lvhState.playerInstance) {
+                window.lvhState.playerInstance.handleFlutterMessage(msg);
+              }
+            });
           }
         };
         
-        console.log('✅ DOM communication setup complete');
+        console.log('✅ DUAL communication setup complete');
         true;
       ''');
 
@@ -133,7 +152,7 @@ class P2PService extends ChangeNotifier {
         }
       });
 
-      P2PUtils.logP2PEvent('Web DOM communication setup successful');
+      P2PUtils.logP2PEvent('Web DUAL communication setup successful');
     } catch (e) {
       P2PUtils.logP2PError('Web communication setup failed', e);
       _updateState(P2PState.disabled);
@@ -143,7 +162,7 @@ class P2PService extends ChangeNotifier {
   /// ✅ POLLING MEJORADO PARA WEB
   void _startWebMessagePolling() {
     _webPollingTimer?.cancel();
-    _webPollingTimer = Timer.periodic(const Duration(milliseconds: 200), (timer) async {
+    _webPollingTimer = Timer.periodic(const Duration(milliseconds: 150), (timer) async {
       if (_webViewController == null) {
         timer.cancel();
         return;
@@ -152,12 +171,13 @@ class P2PService extends ChangeNotifier {
       try {
         // Recibir mensajes del player
         final result = await _webViewController!.evaluateJavascript(source: '''
-          if (window.toFlutterQueue && window.toFlutterQueue.length > 0) {
-            const messages = window.toFlutterQueue.splice(0);
-            JSON.stringify(messages);
-          } else {
-            null;
-          }
+          (function() {
+            if (window.toFlutterQueue && window.toFlutterQueue.length > 0) {
+              const messages = window.toFlutterQueue.splice(0);
+              return JSON.stringify(messages);
+            }
+            return null;
+          })();
         ''');
 
         if (result != null && result.toString() != 'null') {
@@ -215,7 +235,7 @@ class P2PService extends ChangeNotifier {
     };
 
     P2PUtils.logP2PEvent('Sending loadVideo message', {
-      'message': json.encode(message),
+      'messageContent': message,
       'platform': kIsWeb ? 'web' : 'native',
     });
 
@@ -314,6 +334,14 @@ class P2PService extends ChangeNotifier {
         final statsData = event.data['stats'];
         if (statsData != null) {
           _updateStats(P2PStats.fromJson(Map<String, dynamic>.from(statsData)));
+        } else {
+          // Construir stats desde datos individuales
+          final stats = P2PStats(
+            peers: event.data['peers'] ?? 0,
+            p2pDownloaded: event.data['downloaded'] ?? 0,
+            p2pRatio: (event.data['ratio'] ?? 0).toDouble(),
+          );
+          _updateStats(stats);
         }
         break;
 
@@ -405,40 +433,63 @@ class P2PService extends ChangeNotifier {
     }
   }
 
-  /// ✅ ENVÍO DE MENSAJES COMPLETAMENTE REESCRITO PARA WEB
+  /// ✅ ENVÍO DE MENSAJES COMPLETAMENTE REESCRITO
   Future<void> _sendToWebView(Map<String, dynamic> messageData) async {
     if (_webViewController == null) return;
 
-    final messageJson = json.encode(messageData);
-
     try {
+      final messageJson = json.encode(messageData);
+      _lastSentMessage = messageJson;
+
       if (kIsWeb) {
-        // ✅ NUEVO MÉTODO: DOM EVENTS
-        P2PUtils.logP2PEvent('Sending message via DOM event', {'message': messageJson});
+        // ✅ MÉTODO DUAL: DOM EVENTS + POSTMESSAGE
+        P2PUtils.logP2PEvent('Sending message via DUAL method', {'message': messageData});
 
         // Si el player no está listo, guardar mensaje
         if (!_isInitialized) {
-          _pendingMessages.add(messageJson);
+          _pendingMessages.add(messageData);
           P2PUtils.logP2PEvent('Player not ready, message queued', {'pendingCount': _pendingMessages.length});
           return;
         }
 
+        // MÉTODO 1: DOM Events
         await _webViewController!.evaluateJavascript(source: '''
-          console.log('🚀 Dispatching DOM event with message:', ${json.encode(messageData)});
-          
-          // Crear y disparar evento DOM personalizado
-          const event = new CustomEvent('flutter-message', {
-            detail: ${json.encode(messageData)}
-          });
-          
-          document.dispatchEvent(event);
-          console.log('✅ DOM event dispatched successfully');
+          (function() {
+            console.log('🚀 Method 1: Dispatching DOM event with message:', ${json.encode(messageData)});
+            
+            try {
+              const event = new CustomEvent('flutter-message', {
+                detail: ${json.encode(messageData)}
+              });
+              document.dispatchEvent(event);
+              console.log('✅ DOM event dispatched successfully');
+            } catch (e) {
+              console.error('❌ DOM event failed:', e);
+            }
+          })();
         ''');
+
+        // MÉTODO 2: PostMessage (después de un pequeño delay)
+        await Future.delayed(const Duration(milliseconds: 50));
+
+        await _webViewController!.evaluateJavascript(source: '''
+          (function() {
+            console.log('🚀 Method 2: Sending postMessage with message:', ${json.encode(messageData)});
+            
+            try {
+              window.postMessage(${json.encode(messageData)}, '*');
+              console.log('✅ PostMessage sent successfully');
+            } catch (e) {
+              console.error('❌ PostMessage failed:', e);
+            }
+          })();
+        ''');
+
       } else {
         // Para móvil/desktop - método original
         await _webViewController!.evaluateJavascript(source: '''
-          if (window.lvhPlayer && window.lvhPlayer.handleFlutterMessage) {
-            window.lvhPlayer.handleFlutterMessage($messageJson);
+          if (window.lvhState && window.lvhState.playerInstance && window.lvhState.playerInstance.handleFlutterMessage) {
+            window.lvhState.playerInstance.handleFlutterMessage($messageJson);
           } else if (window.sendMessageToPlayer) {
             window.sendMessageToPlayer($messageJson);
           } else {
@@ -455,13 +506,15 @@ class P2PService extends ChangeNotifier {
 
   /// Procesar mensajes pendientes cuando el player esté listo
   Future<void> _processPendingMessages() async {
-    if (_pendingMessages.isEmpty || !kIsWeb) return;
+    if (_pendingMessages.isEmpty) return;
 
     P2PUtils.logP2PEvent('Processing pending messages', {'count': _pendingMessages.length});
 
-    for (final messageJson in _pendingMessages) {
+    final messages = List<Map<String, dynamic>>.from(_pendingMessages);
+    _pendingMessages.clear();
+
+    for (final messageData in messages) {
       try {
-        final messageData = json.decode(messageJson) as Map<String, dynamic>;
         await _sendToWebView(messageData);
         // Pequeña pausa entre mensajes
         await Future.delayed(const Duration(milliseconds: 100));
@@ -469,8 +522,6 @@ class P2PService extends ChangeNotifier {
         P2PUtils.logP2PError('Error processing pending message', e);
       }
     }
-
-    _pendingMessages.clear();
   }
 
   /// Obtener estadísticas de rendimiento
@@ -514,6 +565,7 @@ class P2PService extends ChangeNotifier {
       'state': _currentState.name,
       'initialized': _isInitialized,
       'pending_messages': _pendingMessages.length,
+      'last_sent_message': _lastSentMessage,
       'config': _currentConfig?.toJson(),
       'stats': {
         'peers': _currentStats.peers,
@@ -535,6 +587,17 @@ class P2PService extends ChangeNotifier {
     _pendingMessages.clear();
 
     await _sendToWebView({'action': 'restart', 'timestamp': DateTime.now().millisecondsSinceEpoch});
+  }
+
+  /// Test de comunicación
+  Future<void> testCommunication() async {
+    P2PUtils.logP2PEvent('Testing communication');
+
+    await _sendToWebView({
+      'action': 'test',
+      'message': 'Communication test from Flutter',
+      'timestamp': DateTime.now().millisecondsSinceEpoch,
+    });
   }
 
   /// Cleanup y dispose

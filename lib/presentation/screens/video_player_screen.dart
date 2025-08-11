@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -61,6 +62,11 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   StreamSubscription<P2PEvent>? _eventSubscription;
   StreamSubscription<P2PError>? _errorSubscription;
 
+  // ✅ DEBUGGING Y MONITORING
+  Timer? _debugTimer;
+  int _messagesSent = 0;
+  int _messagesReceived = 0;
+
   @override
   void initState() {
     super.initState();
@@ -69,6 +75,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     _setupSystemUI();
     _setupP2PListeners();
     _startControlsTimer();
+    _startDebugMonitoring();
   }
 
   void _setupAnimations() {
@@ -127,6 +134,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
 
     // Eventos P2P
     _eventSubscription = _p2pService.events.listen((event) {
+      _messagesReceived++;
       _handleP2PEvent(event);
     });
 
@@ -149,6 +157,23 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     }
   }
 
+  /// ✅ DEBUGGING Y MONITORING
+  void _startDebugMonitoring() {
+    _debugTimer = Timer.periodic(const Duration(seconds: 10), (timer) {
+      if (mounted) {
+        P2PUtils.logP2PEvent('Player Debug Info', {
+          'isPlayerReady': _isPlayerReady,
+          'isLoading': _isLoading,
+          'hasError': _hasError,
+          'p2pState': _p2pState.name,
+          'messagesSent': _messagesSent,
+          'messagesReceived': _messagesReceived,
+          'currentUrl': widget.movie.videoUrl,
+        });
+      }
+    });
+  }
+
   void _handleP2PEvent(P2PEvent event) {
     if (!mounted) return;
 
@@ -159,7 +184,12 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
         setState(() {
           _isPlayerReady = true;
         });
+        // ✅ AUTO-LOAD VIDEO CUANDO PLAYER ESTÁ LISTO
         _loadVideo();
+        break;
+
+      case P2PEventType.videoLoading:
+        P2PUtils.logP2PEvent('Video loading event received');
         break;
 
       case P2PEventType.metadataLoaded:
@@ -167,6 +197,13 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
           _isLoading = false;
           _duration = event.data['duration']?.toDouble() ?? 0.0;
         });
+        break;
+
+      case P2PEventType.videoReady:
+        setState(() {
+          _isLoading = false;
+        });
+        P2PUtils.logP2PEvent('Video ready - hiding loading');
         break;
 
       case P2PEventType.play:
@@ -233,6 +270,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     );
   }
 
+  /// ✅ LOAD VIDEO MEJORADO
   Future<void> _loadVideo() async {
     if (_webViewController == null) {
       P2PUtils.logP2PError('WebView controller not available');
@@ -254,7 +292,10 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
         enableDebug: true,
       );
 
+      _messagesSent++;
       await _p2pService.loadVideo(widget.movie.videoUrl, config: config);
+
+      P2PUtils.logP2PEvent('LoadVideo command sent successfully');
 
     } catch (e) {
       P2PUtils.logP2PError('Failed to load video', e);
@@ -300,6 +341,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     _controlsAnimationController.dispose();
     _loadingAnimationController.dispose();
     _controlsTimer?.cancel();
+    _debugTimer?.cancel();
 
     // Cancelar suscripciones P2P
     _statsSubscription?.cancel();
@@ -338,6 +380,9 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
 
           // 📡 P2P Status Indicator
           _buildP2PStatusIndicator(),
+
+          // 🔧 Debug Panel (solo en desarrollo)
+          if (kDebugMode) _buildDebugPanel(),
         ],
       ),
     );
@@ -350,6 +395,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
         onWebViewCreated: (controller) async {
           _webViewController = controller;
           try {
+            P2PUtils.logP2PEvent('WebView created, initializing P2P service');
             await _p2pService.initialize(controller);
           } catch (e) {
             P2PUtils.logP2PError('Failed to initialize P2P service', e);
@@ -371,7 +417,13 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
           P2PUtils.logP2PDebug('WebView loading finished', {'url': url.toString()});
         },
         onConsoleMessage: (controller, consoleMessage) {
-          P2PUtils.logP2PDebug('WebView Console: ${consoleMessage.message}');
+          // Filtrar mensajes de debug para evitar spam
+          final message = consoleMessage.message;
+          if (!message.contains('💓 Heartbeat') &&
+              !message.contains('PostMessage received') &&
+              !message.contains('DOM Event received')) {
+            P2PUtils.logP2PDebug('WebView Console: $message');
+          }
         },
         onLoadError: (controller, url, code, message) {
           P2PUtils.logP2PError('WebView error', {'code': code, 'message': message});
@@ -390,11 +442,72 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
           mediaPlaybackRequiresUserGesture: false,
           allowUniversalAccessFromFileURLs: true,
           allowFileAccessFromFileURLs: true,
-          isInspectable: true, // Para debugging
+          isInspectable: kDebugMode, // Solo en debug
           clearCache: false,
           cacheEnabled: true,
+          // ✅ CONFIGURACIONES ADICIONALES PARA WEB
+          supportZoom: false,
+          useShouldOverrideUrlLoading: false,
+          useOnLoadResource: false,
+          useOnDownloadStart: false,
         ),
         initialFile: "assets/webview/player.html",
+      ),
+    );
+  }
+
+  /// ✅ DEBUG PANEL PARA DESARROLLO
+  Widget _buildDebugPanel() {
+    return Positioned(
+      bottom: 100,
+      left: 16,
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: Colors.black.withOpacity(0.8),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              'Debug Info',
+              style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+            ),
+            Text(
+              'Ready: $_isPlayerReady',
+              style: TextStyle(color: Colors.white, fontSize: 10),
+            ),
+            Text(
+              'Loading: $_isLoading',
+              style: TextStyle(color: Colors.white, fontSize: 10),
+            ),
+            Text(
+              'P2P: ${_p2pState.name}',
+              style: TextStyle(color: Colors.white, fontSize: 10),
+            ),
+            Text(
+              'Sent: $_messagesSent',
+              style: TextStyle(color: Colors.white, fontSize: 10),
+            ),
+            Text(
+              'Received: $_messagesReceived',
+              style: TextStyle(color: Colors.white, fontSize: 10),
+            ),
+            const SizedBox(height: 8),
+            ElevatedButton(
+              onPressed: () async {
+                _messagesSent++;
+                await _p2pService.testCommunication();
+              },
+              style: ElevatedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              ),
+              child: Text('Test Comm', style: TextStyle(fontSize: 10)),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -670,6 +783,17 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
                 fontSize: 14,
               ),
             ),
+            if (kDebugMode) ...[
+              const SizedBox(height: 16),
+              Text(
+                'Debug: Ready=$_isPlayerReady, Sent=$_messagesSent, Recv=$_messagesReceived',
+                style: TextStyle(
+                  color: AppTheme.textGrey,
+                  fontSize: 10,
+                  fontFamily: 'monospace',
+                ),
+              ),
+            ],
           ],
         ),
       ),
@@ -893,6 +1017,15 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
               _showP2PDiagnostic();
             },
           ),
+          if (kDebugMode)
+            ListTile(
+              leading: const Icon(Icons.refresh, color: Colors.white),
+              title: const Text('Forzar Recarga', style: TextStyle(color: Colors.white)),
+              onTap: () {
+                Navigator.pop(context);
+                _retryLoad();
+              },
+            ),
         ],
       ),
     );
@@ -916,6 +1049,10 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
             _buildInfoRow('Peers', _p2pStats.peers.toString()),
             _buildInfoRow('Ratio P2P', _p2pStats.p2pRatioFormatted),
             _buildInfoRow('Descargado', _p2pStats.downloadedMB),
+            if (kDebugMode) ...[
+              _buildInfoRow('Mensajes Enviados', _messagesSent.toString()),
+              _buildInfoRow('Mensajes Recibidos', _messagesReceived.toString()),
+            ],
           ],
         ),
         actions: [
@@ -938,7 +1075,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
         title: const Text('Diagnóstico P2P', style: TextStyle(color: Colors.white)),
         content: SingleChildScrollView(
           child: Text(
-            diagnostic.toString(),
+            const JsonEncoder.withIndent('  ').convert(diagnostic),
             style: const TextStyle(
               color: Colors.white,
               fontSize: 12,

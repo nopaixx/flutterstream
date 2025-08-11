@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LiveVaultHub P2P Player - BRIDGE FIXED</title>
+    <title>LiveVaultHub P2P Player - FULL FIXED</title>
 
     <!-- ✅ HLS.js PRIMERO -->
     <script src="https://cdn.jsdelivr.net/npm/hls.js@~1/dist/hls.min.js"></script>
@@ -194,10 +194,33 @@
     window.toFlutterQueue = [];
     window.fromFlutterQueue = [];
 
-    // ✅ GLOBAL DEBUG FUNCTION
+    // ✅ SAFE DEBUG FUNCTION - AVOIDING CIRCULAR JSON
     window.debugLog = function(message, data = null) {
         const timestamp = new Date().toLocaleTimeString();
-        const logMessage = `[${timestamp}] ${message}${data ? ' ' + JSON.stringify(data) : ''}`;
+        let logMessage = `[${timestamp}] ${message}`;
+
+        if (data) {
+            try {
+                // ✅ SAFE JSON STRINGIFY
+                const safeData = JSON.parse(JSON.stringify(data, (key, value) => {
+                    if (typeof value === 'object' && value !== null) {
+                        if (key.startsWith('$') || key === 'constructor' || key === '__proto__') {
+                            return '[Filtered]';
+                        }
+                        // Skip complex objects that might have circular references
+                        if (value.constructor && value.constructor.name &&
+                            !['Object', 'Array', 'String', 'Number', 'Boolean'].includes(value.constructor.name)) {
+                            return `[${value.constructor.name}]`;
+                        }
+                    }
+                    return value;
+                }));
+                logMessage += ' ' + JSON.stringify(safeData);
+            } catch (e) {
+                logMessage += ' [Complex Object]';
+            }
+        }
+
         console.log('[LiveVaultHub Bridge]', logMessage);
 
         // Update debug panel
@@ -226,13 +249,18 @@
         }
     };
 
-    // ✅ RECEIVE MESSAGES FROM FLUTTER
+    // ✅ RECEIVE MESSAGES FROM FLUTTER - MULTIPLE CHANNELS
     window.addEventListener('message', (event) => {
-        window.debugLog('📥 Bridge received message:', event.data);
         if (event.data && event.data.action) {
-            window.fromFlutterQueue.push(event.data);
+            window.debugLog('📥 Bridge received window message:', event.data);
             window.processFlutterMessage(event.data);
         }
+    });
+
+    // ✅ DOM EVENT LISTENER
+    document.addEventListener('flutter-message', (event) => {
+        window.debugLog('📥 Bridge received DOM event:', event.detail);
+        window.processFlutterMessage(event.detail);
     });
 
     // ✅ PROCESS FLUTTER MESSAGES
@@ -243,6 +271,7 @@
             window.lvhState.playerInstance.handleFlutterMessage(message);
         } else {
             window.debugLog('⚠️ Player not ready, message queued');
+            window.fromFlutterQueue.push(message);
         }
     };
 
@@ -359,6 +388,9 @@
                 // ✅ SETUP COMMUNICATION
                 this.setupMessageListener();
 
+                // ✅ PROCESS QUEUED MESSAGES
+                this.processQueuedMessages();
+
                 // ✅ REGISTER GLOBALLY
                 window.lvhState.playerInstance = this;
                 window.lvhState.isInitialized = true;
@@ -379,7 +411,7 @@
             try {
                 window.debugLog('🔥 Setting up P2P engine...');
 
-                const isP2PSupported = HTMLScriptElement.supports("importmap") && Hls.isSupported();
+                const isP2PSupported = HTMLScriptElement.supports && HTMLScriptElement.supports("importmap") && Hls.isSupported();
 
                 if (isP2PSupported) {
                     this.HlsWithP2P = HlsJsP2PEngine.injectMixin(Hls);
@@ -429,16 +461,12 @@
                                 announceTrackers: [
                                     "wss://tracker.novage.com.ua:443/announce",
                                     "wss://tracker.webtorrent.dev:443/announce",
-                                    // ✅ REMOVER tracker problemático
-                                    // "wss://openwebtorrent.com:443/announce",
                                 ],
                             },
                             onHlsJsCreated: (hls) => {
                                 window.debugLog('🔥 HLS.js instance created with P2P');
                                 this.hlsInstance = hls;
                                 this.setupP2PEventListeners(hls);
-
-                                // ✅ TAMBIÉN SETUP HLS EVENTS
                                 this.setupHLSEvents(hls);
                             },
                         },
@@ -462,7 +490,7 @@
 
             this.player.addEventListener('can-play', () => {
                 window.debugLog('📺 Video can play');
-                this.hideLoading(); // ✅ TAMBIÉN AQUÍ
+                this.hideLoading();
                 this.notifyFlutter('video_ready');
             });
 
@@ -493,19 +521,6 @@
                 this.notifyFlutter('error', { message: 'Error de reproducción' });
             });
 
-            // ✅ EVENTOS ADICIONALES PARA DEBUG
-            this.player.addEventListener('provider-setup', (e) => {
-                window.debugLog('🔧 Provider setup:', e.detail);
-            });
-
-            this.player.addEventListener('source-change', (e) => {
-                window.debugLog('🔄 Source change:', e.detail);
-            });
-
-            this.player.addEventListener('media-type-change', (e) => {
-                window.debugLog('📱 Media type change:', e.detail);
-            });
-
             window.debugLog('✅ Player events configured');
         }
 
@@ -514,7 +529,7 @@
 
             hls.on(Hls.Events.MANIFEST_PARSED, () => {
                 window.debugLog('📋 HLS: Manifest parsed');
-                this.hideLoading(); // ✅ FORZAR HIDE LOADING AQUÍ
+                this.hideLoading();
             });
 
             hls.on(Hls.Events.LEVEL_LOADED, () => {
@@ -559,10 +574,6 @@
             });
 
             this.p2pEngine.addEventListener("onSegmentLoaded", (details) => {
-                if (Math.random() < 0.1) {
-                    window.debugLog('📦 Segment loaded via:', details.source);
-                }
-
                 if (details.source === 'p2p') {
                     this.p2pStats.downloaded += details.bytes || 0;
                     this.setState('sharing');
@@ -612,26 +623,6 @@
 
             if (this.isWeb) {
                 window.debugLog('🌐 Web environment detected');
-
-                // ✅ DOM EVENT LISTENER
-                document.addEventListener('flutter-message', (event) => {
-                    window.debugLog('📨 DOM Event received:', event.detail);
-                    this.handleFlutterMessage(event.detail);
-                });
-
-                // ✅ WINDOW MESSAGE LISTENER
-                window.addEventListener('message', (event) => {
-                    if (event.data && event.data.action) {
-                        window.debugLog('📥 Window message received:', event.data);
-                        this.handleFlutterMessage(event.data);
-                    }
-                });
-
-                setTimeout(() => {
-                    window.debugLog('🧪 Testing communication...');
-                    this.notifyFlutter('player_ready');
-                }, 100);
-
                 window.debugLog('✅ Message listeners configured');
             }
 
@@ -641,6 +632,15 @@
                     type: 'player_ready',
                     timestamp: Date.now()
                 }));
+            }
+        }
+
+        // ✅ PROCESS QUEUED MESSAGES FROM FLUTTER
+        processQueuedMessages() {
+            if (window.fromFlutterQueue.length > 0) {
+                window.debugLog('🔄 Processing queued messages:', window.fromFlutterQueue.length);
+                const messages = window.fromFlutterQueue.splice(0);
+                messages.forEach(msg => this.handleFlutterMessage(msg));
             }
         }
 
